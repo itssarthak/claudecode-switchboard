@@ -1,0 +1,327 @@
+<!doctype html><meta charset=utf-8><title>Claude Code sessions</title>
+<style>
+  :root { color-scheme: light dark; --line: color-mix(in srgb, currentColor 16%, transparent);
+          --dim: color-mix(in srgb, currentColor 55%, transparent) }
+  * { box-sizing: border-box }
+  body { font: 15px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 2rem 2.5rem 4rem;
+         font-variant-numeric: tabular-nums }
+  h1 { font-size: 1.05rem; font-weight: 600; margin: 0 0 1rem }
+  h1 small { font-weight: 400; color: var(--dim) }
+  h2 { font-size: .9rem; font-weight: 600; margin: 2.2rem 0 .7rem;
+       display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap }
+  h2 small { font-weight: 400; font-size: .78rem; color: var(--dim) }
+
+  .bar { display: flex; flex-wrap: wrap; gap: .6rem; margin: 0 0 1.2rem }
+  .stat { border: 1px solid var(--line); border-radius: .5rem; padding: .5rem .85rem; min-width: 8.5rem }
+  .stat b { display: block; font-size: 1.15rem; font-weight: 600; letter-spacing: -.01em }
+  .stat span { font-size: .74rem; color: var(--dim) }
+
+  .legend { display: flex; flex-wrap: wrap; gap: .5rem 1.4rem; font-size: .8rem;
+            padding: 0 0 1.2rem; border-bottom: 1px solid var(--line); margin-bottom: .5rem }
+  .key { display: flex; align-items: baseline; gap: .4rem }
+  .key > span:last-child { color: var(--dim) }
+
+  .grid { display: grid; gap: .7rem; grid-template-columns: repeat(auto-fit, minmax(16rem, 21rem)) }
+  .tile { border: 1px solid var(--c, var(--line)); border-radius: .6rem; padding: .85rem .95rem;
+          background: color-mix(in srgb, var(--c) 5%, transparent);
+          cursor: pointer; transition: transform .08s ease, background .15s }
+  .tile:hover { transform: translateY(-2px); background: color-mix(in srgb, var(--c) 14%, transparent) }
+  .tile.dead { opacity: .4; border-style: dashed }
+
+  .name { font-size: .95rem; font-weight: 600; display: flex; align-items: center; gap: .45rem;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: .1rem }
+  .name span.txt { overflow: hidden; text-overflow: ellipsis }
+  .cmd { margin-left: auto; flex: none; font: inherit; font-size: .68rem; cursor: pointer;
+         border: 1px solid var(--line); border-radius: .3rem; padding: .05rem .4rem;
+         background: transparent; color: var(--dim); opacity: 0; transition: opacity .15s }
+  .tile:hover .cmd, .cmd.armed { opacity: 1 }
+  .cmd.armed { color: var(--c); border-color: var(--c) }
+  .dot { font-size: .62em; line-height: 1; color: var(--c) }
+  .busy { --c: #d99a45 } .idle { --c: #4c9a5a } .stale { --c: #8b8b8b } .unknown { --c: #6b8fd4 }
+  .sub { font-size: .76rem; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+
+  .ctx { margin: .7rem 0 .55rem }
+  .ctx .row { display: flex; justify-content: space-between; font-size: .78rem; margin-bottom: .25rem }
+  .ctx .row b { font-weight: 600 }
+  .ctxbar { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden }
+  .ctxbar i { display: block; height: 100%; background: var(--c) }
+
+  dl { margin: 0; font-size: .8rem; border-top: 1px solid var(--line); padding-top: .5rem }
+  dl div { display: flex; justify-content: space-between; gap: 1rem; line-height: 1.7 }
+  dl dt { color: var(--dim) } dl dd { margin: 0; font-weight: 500 }
+  .counts { font-size: .76rem; color: var(--dim); border-top: 1px solid var(--line);
+            margin-top: .5rem; padding-top: .5rem }
+  .tools { font-size: .73rem; color: var(--dim); margin-top: .3rem;
+           white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+
+  #quota { display: flex; flex-wrap: wrap; gap: 1.4rem; margin: .2rem 0 1rem }
+  .q { min-width: 13rem; flex: 1 1 13rem; max-width: 22rem }
+  .q .qh { display: flex; justify-content: space-between; font-size: .82rem; margin-bottom: .25rem }
+  .q .qh b { font-variant-numeric: tabular-nums }
+  .q .qh span { color: var(--dim) }
+  .q .track { height: .5rem; border-radius: .25rem; background: color-mix(in srgb, currentColor 15%, transparent) }
+  .q .fill { height: 100%; border-radius: .25rem; background: currentColor }
+  .q .rst { font-size: .74rem; color: var(--dim); margin-top: .25rem }
+  .q.normal { color: #4c9a5a } .q.warn { color: #d99a45 } .q.hot { color: #c9584f }
+  .q.err { color: var(--dim); font-size: .82rem }
+
+  .what { margin: .5rem 0 .1rem; font-size: .82rem; line-height: 1.45 }
+  .what .q { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+             overflow: hidden; color: var(--fg) }
+  .what .a { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+             overflow: hidden; color: var(--dim); margin-top: .3rem }
+  .what .lead { color: var(--dim); font-weight: 600 }
+  .doing { font-size: .78rem; color: var(--c); margin-top: .3rem; font-weight: 600 }
+
+  .mail { position: fixed; left: 0; top: 0; z-index: 50; font-size: 6rem; line-height: 1; pointer-events: none;
+           margin: -3rem 0 0 -3rem;                                  /* centre the glyph on the flight path */
+           color: #6b8fd4; filter: drop-shadow(0 0 18px color-mix(in srgb, #6b8fd4 70%, transparent)) }
+  .trail { position: fixed; z-index: 49; height: 3px; transform-origin: 0 50%; pointer-events: none;
+           background: linear-gradient(90deg, transparent, #6b8fd4); opacity: .55 }
+  .tile.landed { animation: land .9s ease-out }
+  @keyframes land { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, #6b8fd4 70%, transparent) }
+                  100% { box-shadow: 0 0 0 14px transparent } }
+  @media (prefers-reduced-motion: reduce) { .mail, .trail { display: none } }
+
+  details.more { margin-top: .5rem; border-top: 1px solid var(--line); padding-top: .4rem }
+  details.more > summary { cursor: pointer; font-size: .76rem; color: var(--dim); list-style: none;
+                           user-select: none; padding: .1rem 0 }
+  details.more > summary::-webkit-details-marker { display: none }
+  details.more > summary::before { content: '▸ '; display: inline-block; transition: transform .15s }
+  details.more[open] > summary::before { transform: rotate(90deg) }
+  details.more > summary:hover { color: var(--fg) }
+
+  #toast { position: fixed; bottom: 1.4rem; left: 50%; transform: translateX(-50%);
+           background: #1c1c1c; color: #f0f0f0; padding: .6rem 1rem; border-radius: .5rem;
+           font-size: .82rem; opacity: 0; transition: opacity .2s; pointer-events: none }
+  #toast.show { opacity: .96 }
+</style>
+<h1>Claude Code sessions <small id=summary></small></h1>
+<div class=bar id=bar></div>
+<div id=quota></div>
+<div class=legend id=legend></div>
+<div id=groups></div>
+<div id=toast></div>
+<script>
+const STATES = {
+  busy:    'mid-turn, working right now',
+  idle:    'alive, waiting for input',
+  unknown: 'alive, never reported a status (SDK sessions)',
+  stale:   'process gone - last known state',
+};
+document.getElementById('legend').innerHTML = Object.entries(STATES).map(([k, v]) =>
+  `<span class="key ${k}"><span class=dot>●</span><b>${k}</b><span>${v}</span></span>`).join('')
+  + `<span class=key><span>· click any tile to jump to its terminal</span></span>`;
+
+const esc = s => String(s ?? '').replace(/[<&"]/g, c => ({ '<': '&lt;', '&': '&amp;', '"': '&quot;' }[c]));
+const tilde = p => (p || '').replace(/^\/Users\/[^/]+/, '~');
+const label = p => tilde(p).split('/').filter(Boolean).pop() || '~';
+const k = n => !n ? '0' : n < 1e3 ? String(n) : n < 1e6 ? (n / 1e3).toFixed(n < 1e4 ? 1 : 0) + 'k'
+                                              : (n / 1e6).toFixed(n < 1e7 ? 2 : 1) + 'M';
+const ago = ms => { const s = (Date.now() - ms) / 1e3;
+  return s < 60 ? `${s|0}s` : s < 3600 ? `${s/60|0}m` : s < 86400 ? `${s/3600|0}h` : `${s/86400|0}d` };
+const row = (dt, dd) => `<div><dt>${dt}</dt><dd>${dd}</dd></div>`;
+
+function what(u, state) {
+  if (!u) return '';
+  const head = u.summary || u.lastUser;
+  return `<div class=what>${
+    head ? `<div class=q><span class=lead>${u.summary ? 'topic' : 'asked'}</span> ${esc(head)}</div>` : ''}${
+    u.lastAssistant ? `<div class=a>${esc(u.lastAssistant)}</div>` : ''}${
+    state === 'busy' && u.lastTool
+      ? `<div class=doing>⚙ ${esc(u.lastTool.replace(/^mcp__[^_]+__/, ''))} · ${ago(u.lastToolAt)} ago</div>` : ''}
+  </div>`;
+}
+
+// --- session -> session messages: fly an envelope between the two tiles -------------
+const seenMsg = new Set();
+let firstFlight = true;                       // don't replay the whole backlog on load
+
+const centre = pid => {
+  const el = document.querySelector(`.tile[data-pid="${pid}"]`);
+  if (!el) return null;
+  const b = el.getBoundingClientRect(), m = 24;
+  // a tile below the fold would send the envelope off into nowhere - clamp to the viewport edge
+  return { el, offscreen: b.bottom < 0 || b.top > innerHeight,
+    x: Math.max(m, Math.min(innerWidth - m, b.left + b.width / 2)),
+    y: Math.max(m, Math.min(innerHeight - m, b.top + b.height / 2)) };
+};
+
+function fly(from, to, label) {
+  const a = centre(from), b = centre(to);
+  if (!a || !b) return;                       // sender or receiver not on screen - skip
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const dist = Math.hypot(dx, dy), deg = Math.atan2(dy, dx) * 180 / Math.PI;
+  const arc = Math.min(120, dist * .22);      // lift the midpoint so it curves
+
+  const trail = document.createElement('div');
+  trail.className = 'trail';
+  trail.style.cssText += `left:${a.x}px;top:${a.y}px;width:${dist}px;transform:rotate(${deg}deg)`;
+  const mail = document.createElement('div');
+  mail.className = 'mail';
+  mail.textContent = '✉';
+  mail.title = label || '';
+  document.body.append(trail, mail);
+
+  const dur = Math.min(1600, 600 + dist);
+  mail.animate([
+    { transform: `translate(${a.x}px, ${a.y}px) scale(.5)`, opacity: 0 },
+    { transform: `translate(${a.x + dx * .5}px, ${a.y + dy * .5 - arc}px) scale(1)`, opacity: 1, offset: .5 },
+    { transform: `translate(${b.x}px, ${b.y}px) scale(.5)`, opacity: 0 },
+  ], { duration: dur, easing: 'ease-in-out' }).onfinish = () => {
+    mail.remove();
+    if (b.offscreen) return;
+    b.el.classList.add('landed');
+    setTimeout(() => b.el.classList.remove('landed'), 900);
+  };
+  trail.animate([{ opacity: 0 }, { opacity: .55, offset: .4 }, { opacity: 0 }],
+    { duration: dur, easing: 'ease-out' }).onfinish = () => trail.remove();
+}
+
+function flights(sessions) {
+  const name = new Map(sessions.map(s => [s.pid, s.name]));
+  for (const s of sessions) for (const m of s.usage?.inbox || []) {
+    const key = `${s.pid}:${m.at}`;
+    if (seenMsg.has(key)) continue;
+    seenMsg.add(key);
+    if (firstFlight || Date.now() - m.at > 12e4) continue;   // only animate genuinely fresh traffic
+    fly(m.from, s.pid, `${name.get(m.from) || m.name || m.from} → ${s.name}`);
+  }
+  firstFlight = false;
+}
+
+const openTiles = new Set();
+document.addEventListener('toggle', e => {
+  const t = e.target.closest?.('.tile'); if (!t || !e.target.matches('details.more')) return;
+  e.target.open ? openTiles.add(t.dataset.pid) : openTiles.delete(t.dataset.pid);
+}, true);                                     // 'toggle' does not bubble - capture instead
+
+function tile(r) {
+  const state = !r.alive ? 'stale' : (r.status || 'unknown');
+  const u = r.usage;
+  const win = u && u.ctx > 2e5 ? 1e6 : 2e5;
+  const top = u ? Object.entries(u.byTool).sort((a, b) => b[1] - a[1]).slice(0, 3)
+                  .map(([n, c]) => `${n.replace(/^mcp__[^_]+__/, '')} ${c}`).join('  ·  ') : '';
+  return `<div class="tile ${state} ${r.alive ? '' : 'dead'}" data-pid="${r.pid}"
+       title="${esc(r.sessionId)}\n${esc(r.cwd)}\nclick to focus this terminal">
+    <div class=name><span class=dot>●</span><span class=txt>${esc(r.name || r.sessionId?.slice(0, 8))}</span>${
+      r.alive ? `<button class=cmd data-cmd=compact>compact</button>` : ''}</div>
+    <div class=sub>${state} · pid ${r.pid}${r.startedAt ? ` · up ${ago(r.startedAt)}` : ''}${
+      u?.lastAt ? ` · active ${ago(u.lastAt)} ago` : ''}</div>
+    <div class=sub>${esc((u?.model || r.version || '').replace('claude-', ''))}${
+      u?.effort ? ` · ${esc(u.effort)}` : ''}${
+      u?.branch && u.branch !== 'HEAD' ? ` · ⑂ ${esc(u.branch)}` : ''}</div>
+    ${what(u, state)}
+    ${u ? `
+    <div class=ctx>
+      <div class=row><span>context</span><b>${k(u.ctx)} / ${win === 1e6 ? '1M' : '200k'}</b></div>
+      <div class=ctxbar><i style="width:${Math.min(100, u.ctx / win * 100)}%"></i></div>
+    </div>
+    <dl>
+      ${row('burning (5m)', k(u.burn))}
+      ${row('<b>all tokens</b>', '<b>' + k(u.total) + '</b>')}
+    </dl>
+    <details class=more ${openTiles.has(String(r.pid)) ? 'open' : ''}>
+      <summary>breakdown</summary>
+      <dl>
+        ${row('output', k(u.tok.output))}
+        ${row('input', k(u.tok.input))}
+        ${row('cache read', k(u.tok.cacheRead))}
+        ${row('cache write', k(u.tok.cacheWrite))}
+        ${row('thinking', k(u.tok.thinking))}
+      </dl>
+      <div class=counts>${u.turns} turns · ${u.msgs} replies · ${u.tools} tool calls${
+        u.sidechain ? ` · ${u.sidechain} subagent` : ''}</div>
+      ${top ? `<div class=tools>${esc(top)}</div>` : ''}
+    </details>` : ''}
+  </div>`;
+}
+
+const QLABEL = l => l.kind === 'session' ? '5-hour session'
+  : l.kind === 'weekly_all' ? 'Weekly (all models)'
+  : l.kind === 'weekly_scoped' ? `Weekly (${l.scope?.model?.display_name || 'scoped'})`
+  : l.kind;
+
+function until(iso) {
+  if (!iso) return '';
+  const ms = new Date(iso) - Date.now();
+  if (ms <= 0) return 'resetting…';
+  const h = Math.floor(ms / 36e5), m = Math.round(ms % 36e5 / 6e4);
+  return `resets in ${h ? h + 'h ' : ''}${m}m · ${new Date(iso).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}`;
+}
+
+function renderQuota(q) {
+  const el = document.getElementById('quota');
+  if (!q || q.error) return el.innerHTML = `<div class="q err">plan usage unavailable — ${esc(q?.error || 'no data')}</div>`;
+  const limits = (q.limits || []).filter(l => l.percent != null && (l.kind !== 'weekly_scoped' || l.percent > 0));
+  el.innerHTML = limits.map(l => {
+    const p = Math.min(100, l.percent);
+    const cls = p >= 90 ? 'hot' : p >= 70 ? 'warn' : 'normal';
+    return `<div class="q ${cls}">
+      <div class=qh><span>${esc(QLABEL(l))}</span><b>${p}%</b></div>
+      <div class=track><div class=fill style="width:${p}%"></div></div>
+      <div class=rst>${esc(until(l.resets_at))}</div>
+    </div>`;
+  }).join('') + (q.extra_usage?.is_enabled
+    ? `<div class="q normal"><div class=qh><span>Extra usage</span><b>${q.extra_usage.utilization ?? 0}%</b></div></div>` : '');
+}
+
+async function tick() {
+  const { sessions, rollup, quota } = await (await fetch('/api')).json();
+  renderQuota(quota);
+  const today = rollup.days[new Date().toISOString().slice(0, 10)] || {};
+  const sum = f => sessions.reduce((n, s) => n + (s.usage ? f(s.usage) : 0), 0);
+
+  document.getElementById('summary').textContent =
+    `— ${sessions.filter(s => s.alive).length} live in ${new Set(sessions.map(s => s.cwd)).size} projects`;
+  document.getElementById('bar').innerHTML = [
+    [k(sum(u => u.burn)), 'output, last 5 min', 'across every live session'],
+    [k(sum(u => u.ctx)), 'held in context', 'sum of every session window'],
+    [k(today.output), 'output today', 'account-wide, from transcripts'],
+    [k((today.input || 0) + (today.output || 0) + (today.cacheWrite || 0) + (today.cacheRead || 0)),
+      'all tokens today', `${today.msgs || 0} model replies today`],
+    [rollup.scanning ? `${rollup.done}/${rollup.files}` : String(rollup.sessions),
+      rollup.scanning ? 'scanning…' : 'transcripts read',
+      rollup.scanning ? 'reading every transcript once' : `updated ${new Date(rollup.at).toLocaleTimeString()}`],
+  ].map(([val, lab, sub]) => `<div class=stat title="${esc(sub)}"><b>${val}</b><span>${lab}</span></div>`).join('');
+
+  const by = new Map();
+  for (const r of sessions) { if (!by.has(r.cwd)) by.set(r.cwd, []); by.get(r.cwd).push(r); }
+  const tokens = r => r.usage?.total || 0;
+  const spent = rs => rs.reduce((n, r) => n + tokens(r), 0);
+  for (const rs of by.values()) rs.sort((a, b) => (b.alive - a.alive) || tokens(b) - tokens(a));
+  const groups = [...by.entries()].sort((a, b) => spent(b[1]) - spent(a[1]));
+  document.getElementById('groups').innerHTML = groups.map(([cwd, rs]) =>
+    `<h2>${esc(label(cwd))} <small>${esc(tilde(cwd))}</small>
+      <small>${rs.length} session${rs.length > 1 ? 's' : ''} · ${k(spent(rs))} tokens</small></h2>
+     <div class=grid>${rs.map(tile).join('')}</div>`).join('');
+  flights(sessions);
+}
+
+const toast = m => { const t = document.getElementById('toast');
+  t.textContent = m; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2600) };
+
+document.addEventListener('click', async e => {
+  const btn = e.target.closest('.cmd');
+  if (btn) {
+    e.stopPropagation();
+    const pid = btn.closest('.tile').dataset.pid, cmd = btn.dataset.cmd;
+    if (!btn.classList.contains('armed')) {          // two-step: arm, then send
+      btn.classList.add('armed'); btn.textContent = `/${cmd}?`;
+      return setTimeout(() => { btn.classList.remove('armed'); btn.textContent = cmd }, 3000);
+    }
+    btn.classList.remove('armed'); btn.textContent = cmd;
+    const r = await (await fetch(`/send?pid=${pid}&cmd=${cmd}`, { method: 'POST' })).json();
+    return toast(r.ok ? `/${cmd} sent to ${r.app}${r.queued ? ' (queued - session is mid-turn)' : ''}`
+                      : `couldn't send: ${r.error}`);
+  }
+  if (e.target.closest('details.more')) return;      // expanding is not a focus click
+  const el = e.target.closest('.tile'); if (!el) return;
+  const r = await (await fetch('/focus?pid=' + el.dataset.pid, { method: 'POST' })).json();
+  toast(r.ok ? (r.exact ? `focused ${r.app} · ${r.tty}`
+                        : `raised ${r.app} — find ${r.tty} (editor terminals aren't scriptable)`)
+             : `couldn't focus: ${r.error}`);
+});
+
+tick(); setInterval(tick, 2000);
+</script>
