@@ -31,6 +31,11 @@
   .name { font-size: .95rem; font-weight: 600; display: flex; align-items: center; gap: .45rem;
           white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: .1rem }
   .name span.txt { overflow: hidden; text-overflow: ellipsis }
+  .kill { flex: none; font: inherit; font-size: .68rem; cursor: pointer; margin-left: .3rem;
+          background: none; border: 1px solid var(--line); border-radius: .25rem;
+          color: #c9584f; padding: .05rem .35rem; opacity: 0; transition: opacity .15s }
+  .tile:hover .kill { opacity: 1 }
+  .kill:hover { border-color: #c9584f; background: color-mix(in srgb, #c9584f 12%, transparent) }
   .cmd { margin-left: auto; flex: none; font: inherit; font-size: .68rem; cursor: pointer;
          border: 1px solid var(--line); border-radius: .3rem; padding: .05rem .4rem;
          background: transparent; color: var(--dim); opacity: 0; transition: opacity .15s }
@@ -205,7 +210,8 @@ function tile(r) {
   return `<div class="tile ${state} ${r.alive ? '' : 'dead'}" data-pid="${r.pid}"
        title="${esc(r.sessionId)}\n${esc(r.cwd)}\nclick to focus this terminal">
     <div class=name><span class=dot>●</span><span class=txt>${esc(r.name || r.sessionId?.slice(0, 8))}</span>${
-      r.alive ? `<button class=cmd data-cmd=compact>compact</button>` : ''}</div>
+      r.alive ? `<button class=cmd data-cmd=compact>compact</button>
+                 <button class=kill title="send SIGTERM to pid ${r.pid}">kill</button>` : ''}</div>
     <div class=sub>${state} · pid ${r.pid}${r.startedAt ? ` · up ${ago(r.startedAt)}` : ''}${
       u?.lastAt ? ` · active ${ago(u.lastAt)} ago` : ''}</div>
     <div class=sub>${esc((u?.model || r.version || '').replace('claude-', ''))}${
@@ -302,6 +308,16 @@ const toast = m => { const t = document.getElementById('toast');
   t.textContent = m; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2600) };
 
 document.addEventListener('click', async e => {
+  const kb = e.target.closest('.kill');
+  if (kb) {
+    e.stopPropagation();
+    const tile = kb.closest('.tile'), pid = tile.dataset.pid;
+    const name = tile.querySelector('.name .txt')?.textContent || pid;
+    if (!confirm(`Kill "${name}" (pid ${pid})?\n\nSends SIGTERM. The session stops immediately; `
+               + `its transcript is kept but any work mid-turn is lost.`)) return;
+    const r = await (await fetch('/kill?pid=' + pid, { method: 'POST' })).json();
+    return toast(r.ok ? `SIGTERM sent to ${r.name}` : `couldn't kill: ${r.error}`);
+  }
   const btn = e.target.closest('.cmd');
   if (btn) {
     e.stopPropagation();

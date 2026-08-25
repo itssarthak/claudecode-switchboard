@@ -326,6 +326,15 @@ async function fetchQuota() {
 }
 const quota = () => (Date.now() - quotaAt > 60e3 && fetchQuota(), quotaData);   // refresh in background, serve last
 
+// SIGTERM, not SIGKILL: let the session flush its transcript and registry file.
+function killSession(pid) {
+  const live = scan().find(s => s.pid === pid);          // only pids in the registry
+  if (!live) return { ok: false, error: 'no such session' };
+  if (!live.alive) return { ok: false, error: 'already dead' };
+  try { process.kill(pid, 'SIGTERM') } catch (e) { return { ok: false, error: e.code || String(e) } }
+  return { ok: true, name: live.name || String(pid) };
+}
+
 const PORT = Number(process.env.PORT) || 7823;
 const HOST = process.env.HOST || '127.0.0.1';   // loopback only: /api carries your prompt text
 
@@ -340,7 +349,8 @@ const sameOrigin = req => {
 const server = http.createServer((req, res) => {
   const sendCmd = req.url.match(/^\/send\?pid=(\d+)&cmd=(\w+)$/);
   const focusPid = req.url.match(/^\/focus\?pid=(\d+)$/);
-  if ((sendCmd || focusPid) && !(sameOrigin(req) && req.method === 'POST')) {
+  const killPid = req.url.match(/^\/kill\?pid=(\d+)$/);
+  if ((sendCmd || focusPid || killPid) && !(sameOrigin(req) && req.method === 'POST')) {
     res.writeHead(403, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     return res.end(JSON.stringify({ ok: false, error: 'cross-origin or non-POST request refused' }));
   }
@@ -350,6 +360,9 @@ const server = http.createServer((req, res) => {
   } else if (focusPid) {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify(focus(Number(focusPid[1]))));
+  } else if (killPid) {
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+    res.end(JSON.stringify(killSession(Number(killPid[1]))));
   } else if (req.url === '/api') {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify({ sessions: scan(), rollup, quota: quota(), now: Date.now() }));

@@ -38,6 +38,7 @@ sorted by tokens burned.
 **Interactions**
 - Click a tile to focus that session's terminal tab.
 - Hover a tile for a `compact` button — click once to arm, again to send `/compact`.
+- Hover for a `kill` button — sends SIGTERM after a confirmation prompt.
 - When one session messages another, an envelope flies between the two tiles.
 
 ## Requirements
@@ -107,9 +108,12 @@ last assistant reply for every session. Treat the port like your terminal.
 - It binds to **loopback only**. Setting `HOST=0.0.0.0` publishes your prompts, working
   directories and session names to everyone on your network, with no authentication of
   any kind. Don't.
-- `/focus` and `/send` are **POST-only and reject cross-origin requests**, because any web
-  page you visit can issue requests to a localhost port. Without this, an `<img>` tag on
-  any site could trigger `/compact` on your sessions.
+- `/focus`, `/send` and `/kill` are **POST-only and reject cross-origin requests**, because
+  any web page you visit can issue requests to a localhost port. Without this, an `<img>`
+  tag on any site could trigger `/compact` — or `/kill` — on your sessions.
+- `/kill` sends **SIGTERM, never SIGKILL**, and only to a pid that is currently live *and*
+  present in the session registry. It cannot signal arbitrary processes: `pid 1` and
+  anything else Claude Code doesn't own is refused. The UI asks for confirmation first.
 - `/send` accepts an **allowlist** — `compact`, `context`, `cost`, `status` — and nothing
   else. It is not a general "type into my terminal" endpoint. The target pid must be live
   and present in the session registry, and its tty must match `^ttys?\d+$`.
