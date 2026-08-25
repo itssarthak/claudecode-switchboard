@@ -1,8 +1,10 @@
-# claude-sessions
+# switchboard
 
 A local dashboard for every Claude Code session running on your Mac — what each one is
 working on, how many tokens it has burned, how much of your plan is left, and which
 sessions are messaging each other.
+
+Not affiliated with Anthropic.
 
 No dependencies, no build step, no telemetry. Two files and Node's stdlib.
 
