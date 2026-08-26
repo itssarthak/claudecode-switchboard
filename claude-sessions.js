@@ -9,6 +9,10 @@ const SESSIONS = path.join(HOME, '.claude', 'sessions');
 const PROJECTS = path.join(HOME, '.claude', 'projects');
 const BURN_WINDOW = 5 * 60e3;   // "active" consumption = last 5 minutes
 
+const dayKey = ts => {                                   // local calendar day, not UTC
+  const d = new Date(ts);
+  return new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
+};
 const alive = pid => { try { process.kill(pid, 0); return true } catch (e) { return e.code === 'EPERM' } };
 
 // --- transcript index: sessionId -> jsonl path. Slug rules are lossy, so just look. ---
@@ -35,7 +39,7 @@ const blank = () => ({
   msgs: 0, turns: 0, tools: 0, byTool: {}, sidechain: 0, ctx: 0, daily: {},
   model: null, effort: null, branch: null, lastAt: 0,
   summary: null, lastUser: null, lastAssistant: null, lastTool: null, lastToolAt: 0,
-  inbox: [],
+  inbox: [], outbox: [], outbox: [],
 });
 
 function usage(file) {
@@ -60,7 +64,15 @@ function usage(file) {
 // injected pseudo-user turns: tool results, <system-reminder>, observer/cross-session relays
 const NOISE = /^(<|\[MESSAGE FROM NON-USER|Another Claude session sent|Caveat: The messages below|This session is being continued|Continue from where you left off)/;
 // receiver side of a session->session message: the socket path carries the sender's pid
-const XSESS = /<cross-session-message from="uds:[^"]*?\/(\d+)\.sock"(?:[^>]*?from-name="([^"]*)")?/;
+const XSESS = /<cross-session-message from="uds:[^"]*?\/(\d+)\.sock"(?:[^>]*?from-name="([^"]*)")?[^>]*>\s*([\s\S]{0,1200})/;
+// summaries are short (median ~56 chars); only the raw-body fallback needs cutting, and
+// slicing mid-word looks broken - break at whitespace instead
+const clip = (t, n = 700) => {
+  t = String(t || '').trim();
+  if (t.length <= n) return t;
+  const cut = t.slice(0, n);
+  return cut.slice(0, Math.max(cut.lastIndexOf(' '), n - 60)).trimEnd() + '…';
+};
 const text = m => (typeof m?.content === 'string' ? m.content
   : (m?.content || []).filter(b => b.type === 'text').map(b => b.text).join(' ')).trim();
 
@@ -77,12 +89,20 @@ function ingest(st, e) {
   if (Array.isArray(c)) for (const p of c) if (p.type === 'tool_use') {
     st.tools++; st.byTool[p.name] = (st.byTool[p.name] || 0) + 1;
     st.lastTool = p.name; st.lastToolAt = ts;                        // best "doing right now" signal
+    if (p.name === 'SendMessage') {
+      st.outbox.push({ at: ts, to: p.input?.to ?? null, summary: p.input?.summary || null,
+                       preview: clip(p.input?.message) });
+      st.outbox.splice(0, st.outbox.length - 20);
+    }
   }
   if (!e.isSidechain) {
     const t = text(e.message);
     // tool results and <system-reminder>/<local-command-stdout> arrive as type:'user' too - skip them
     const x = t && XSESS.exec(t);
-    if (x) { st.inbox.push({ at: ts, from: Number(x[1]), name: x[2] || null }); st.inbox.splice(0, st.inbox.length - 20) }
+    if (x) {
+      st.inbox.push({ at: ts, from: Number(x[1]), name: x[2] || null, body: clip(x[3]) });
+      st.inbox.splice(0, st.inbox.length - 20);
+    }
     if (t && e.type === 'user' && !NOISE.test(t)) st.lastUser = t.slice(0, 300);
     if (t && e.type === 'assistant') st.lastAssistant = t.slice(0, 300);
   }
@@ -103,7 +123,7 @@ function ingest(st, e) {
   // context currently in play = what the last request actually carried
   st.ctx = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
   st.recent.push({ ts, out: u.output_tokens || 0 });
-  const day = new Date(ts || Date.now()).toISOString().slice(0, 10);
+  const day = dayKey(ts || Date.now());
   const d = st.daily[day] ??= { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, msgs: 0 };
   d.input += u.input_tokens || 0; d.output += u.output_tokens || 0;
   d.cacheWrite += u.cache_creation_input_tokens || 0; d.cacheRead += u.cache_read_input_tokens || 0;
@@ -157,7 +177,35 @@ const scan = () => !fs.existsSync(SESSIONS) ? [] : fs.readdirSync(SESSIONS).filt
 }).filter(Boolean).sort((a, b) => (b.alive - a.alive) || (b.startedAt - a.startedAt));
 
 // --- self-check: incremental parse must equal a one-shot parse, and repeat polls must not drift
-if (process.argv[2] === '--selftest') {
+if (process.argv[2] === '--report') {
+  const m = n => n == null ? '—' : (n / 1e6).toFixed(1) + 'M';
+  const d = iso => iso ? new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—';
+  setTimeout(() => {
+    const r = report(), w = r.week;
+    if (!w.impliedFullWeek) {
+      console.log(`\nNo usage data yet.${w.note ? ' ' + w.note : ''}`);
+      console.log(`Run the server for a few minutes so it can pair a plan percentage with token counts.`);
+      console.log(r.days.length ? `\n(${r.days.length} days of tokens recorded, but no plan percentage to scale them against.)\n` : '');
+      process.exit(0);
+    }
+    console.log(`\nquota week  ${d(w.startedAt)}  ->  ${d(w.resetsAt)}   (${r.timezone})`);
+    console.log(`  reported   ${w.percentUsed == null ? '—' : w.percentUsed + '%'} used`);
+    console.log(`  measured   ${m(w.tokensUsed)} tokens burned${w.exact ? '' : ' (approx - no sample from week start)'}`);
+    console.log(`  => 100% is ${m(w.impliedFullWeek)} tokens   [derived, see caveat]`);
+    console.log(`  remaining  ${m(w.tokensRemaining)}`);
+    console.log(`  run rate   ${m(w.runRatePerDay)}/day  ->  ${m(w.projectedFullWeek)} by reset (${w.projectedPercent ?? '—'}% of implied)`);
+    console.log(`  hits 100%  ${d(w.exhaustedAt)}`);
+    console.log(`\n  day          tokens    output   %of week`);
+    for (const x of r.days.slice(0, 14))
+      console.log(`  ${x.date}  ${m(x.total).padStart(7)}  ${m(x.output).padStart(7)}   ${(x.pctOfWeek ?? '—') + '%'}${x.partial ? '  (partial)' : ''}`);
+    if (r.weeks.length > 1) {
+      console.log(`\n  week starting   tokens`);
+      for (const x of r.weeks) console.log(`  ${x.from.slice(0, 10)}     ${m(x.used).padStart(7)}${x.current ? '  (current)' : ''}`);
+    }
+    console.log(`\n  ledger since ${d(r.since)}, ${r.samples} samples\n`);
+    process.exit(0);
+  }, 3000);   // let the first rollup pass finish
+} else if (process.argv[2] === '--selftest') {
   const assert = require('assert');
   const file = process.argv[3] || [...(() => { transcriptOf('_'); return index.values() })()]
     .sort((a, b) => fs.statSync(b).size - fs.statSync(a).size)[0];
@@ -298,8 +346,18 @@ function send(pid, cmd) {
 
 
 // --- plan quota (live) --------------------------------------------------------------
-// same endpoint /usage hits. token stays in this process - never logged, never served.
-let quotaAt = 0, quotaData = { error: 'not fetched yet' };
+// Shared endpoint: Claude Code itself calls it, once per session. Poll it gently, cache
+// across restarts, and back off hard on 429 - hammering it is what gets you rate limited.
+const DATA = path.join(HOME, '.switchboard');
+const QCACHE = path.join(DATA, 'quota-cache.json');
+const QUOTA_EVERY = 5 * 60e3;
+
+let quotaAt = 0, quotaGood = null, quotaErr = 'not fetched yet', backoff = 0;
+try {                                                    // survive a restart without refetching
+  const c = JSON.parse(fs.readFileSync(QCACHE, 'utf8'));
+  if (Date.now() - c.at < QUOTA_EVERY) { quotaGood = c.data; quotaAt = c.at; quotaErr = null }
+} catch {}
+
 function oauthToken() {
   for (const svc of ['Claude Code-credentials', 'Claude Code']) {
     try {
@@ -311,20 +369,205 @@ function oauthToken() {
   }
   return null;
 }
+
 async function fetchQuota() {
   quotaAt = Date.now();
   const t = oauthToken();
-  if (!t) return quotaData = { error: 'no oauth token in keychain (api-key auth?)' };
+  if (!t) return quotaErr = 'no oauth token in keychain (api-key auth?)';
   try {
     const r = await fetch('https://api.anthropic.com/api/oauth/usage', {
       headers: { authorization: `Bearer ${t}`, 'anthropic-beta': 'oauth-2025-04-20' },
     });
-    if (r.status === 401) return quotaData = { error: 'token expired - run any claude command to refresh' };
-    if (!r.ok) return quotaData = { error: `HTTP ${r.status}` };
-    return quotaData = { at: Date.now(), ...(await r.json()) };
-  } catch (e) { return quotaData = { error: String(e.message || e) } }
+    if (r.status === 429) {                              // never retry straight into a 429
+      const after = Number(r.headers.get('retry-after')) * 1000;
+      backoff = Math.min(30 * 60e3, after || (backoff ? backoff * 2 : 5 * 60e3));
+      quotaAt = Date.now() + backoff - QUOTA_EVERY;      // push the next attempt out
+      return quotaErr = `rate limited, retrying in ${Math.round(backoff / 6e4)}m`;
+    }
+    if (r.status === 401) return quotaErr = 'token expired - run any claude command to refresh';
+    if (!r.ok) return quotaErr = `HTTP ${r.status}`;
+    backoff = 0; quotaErr = null;
+    quotaGood = { at: Date.now(), ...(await r.json()) };
+    try { fs.mkdirSync(DATA, { recursive: true }); fs.writeFileSync(QCACHE, JSON.stringify({ at: quotaGood.at, data: quotaGood })) } catch {}
+    return quotaGood;
+  } catch (e) { return quotaErr = String(e.message || e) }
 }
-const quota = () => (Date.now() - quotaAt > 60e3 && fetchQuota(), quotaData);   // refresh in background, serve last
+
+// a failed refresh keeps serving the last good numbers, flagged stale - better than blanking the bar
+const quota = () => {
+  if (Date.now() - quotaAt > QUOTA_EVERY) fetchQuota();
+  if (quotaGood) return quotaErr ? { ...quotaGood, stale: true, error: quotaErr } : quotaGood;
+  return { error: quotaErr || 'not fetched yet' };
+};
+
+// --- persistent daily/weekly ledger --------------------------------------------------
+// The rollup only reads the last DAYS days and forgets everything older, so days are
+// accumulated here instead. Values only ever ratchet up: a later pass that reads fewer
+// transcripts must not shrink a day that was already recorded.
+const LEDGER = path.join(DATA, 'ledger.json');
+const SAMPLES = path.join(DATA, 'samples.jsonl');
+const SAMPLE_EVERY = 5 * 60e3;
+const FIELDS = ['input', 'output', 'cacheWrite', 'cacheRead', 'msgs'];
+const totalOf = d => (d.input || 0) + (d.output || 0) + (d.cacheWrite || 0) + (d.cacheRead || 0);
+
+let ledger = { since: null, days: {} };
+try { ledger = JSON.parse(fs.readFileSync(LEDGER, 'utf8')) } catch {}
+const ledgerTotal = () => Object.values(ledger.days).reduce((n, d) => n + totalOf(d), 0);
+
+let sampledAt = 0;
+function sample() {
+  if (rollup.scanning || !rollup.at) return;             // only record a complete pass
+  quota();                                               // refresh if stale; pairs % with tokens
+  sampledAt = Date.now();
+  ledger.since ??= Date.now();
+  for (const [day, t] of Object.entries(rollup.days)) {
+    const cur = ledger.days[day] ??= { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, msgs: 0 };
+    for (const k of FIELDS) cur[k] = Math.max(cur[k] || 0, t[k] || 0);
+  }
+  try {
+    fs.mkdirSync(DATA, { recursive: true });
+    fs.writeFileSync(LEDGER, JSON.stringify(ledger));
+    fs.appendFileSync(SAMPLES, JSON.stringify({
+      t: sampledAt, total: ledgerTotal(),
+      week: quotaGood?.seven_day?.utilization ?? null,
+      resets: quotaGood?.seven_day?.resets_at ?? null,
+    }) + '\n');
+  } catch {}
+}
+setInterval(sample, SAMPLE_EVERY);
+setTimeout(sample, 15e3);
+setTimeout(quota, 2e3);      // warm the cache so a sample never lands without a percentage
+
+const SAMPLE_KEEP_DAYS = 120;
+function trimSamples() {                                 // ~26 KB/day, so cap it at 120 days
+  try {
+    const cutoff = Date.now() - SAMPLE_KEEP_DAYS * 864e5;
+    const lines = fs.readFileSync(SAMPLES, 'utf8').split('\n').filter(Boolean);
+    const keep = lines.filter(l => { try { return JSON.parse(l).t >= cutoff } catch { return false } });
+    if (keep.length < lines.length) fs.writeFileSync(SAMPLES, keep.join('\n') + '\n');
+  } catch {}
+}
+setTimeout(trimSamples, 30e3);
+setInterval(trimSamples, 12 * 3600e3);
+
+const readSamples = () => {
+  try {
+    return fs.readFileSync(SAMPLES, 'utf8').split('\n')
+      .filter(Boolean).map(l => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean);
+  } catch { return [] }
+};
+
+// What was the running total at time t? Prefer the last sample at or before it.
+const totalAt = (samples, t) => {
+  const before = samples.filter(s => s.t <= t).pop();
+  return before ? { total: before.total, exact: true } : null;
+};
+
+function report() {
+  const samples = readSamples();
+  // the endpoint rate limits; fall back to the last sample that carried a percentage so
+  // the report still works while we are backed off
+  const last = [...samples].reverse().find(s => s.week != null);
+  const live = quotaGood?.seven_day?.utilization != null;
+  const pct = live ? quotaGood.seven_day.utilization : (last?.week ?? null);
+  const resetsIso = live ? quotaGood.seven_day.resets_at : (last?.resets ?? null);
+  const resets = resetsIso ? Date.parse(resetsIso) : null;
+  const weekStart = resets ? resets - 7 * 864e5 : null;
+  const now = Date.now(), nowTotal = ledgerTotal();
+  // a stale percentage was true at its sample time, so measure tokens up to that moment
+  const asOf = live ? now : (last?.t ?? now);
+
+  // tokens burned so far this quota week
+  const base = weekStart ? totalAt(samples, weekStart) : null;
+  const head = live ? nowTotal : (last?.total ?? nowTotal);
+  let weekUsed = base ? head - base.total : null, exact = !!base;
+  if (weekUsed == null && weekStart) {                   // no sample that old yet - sum whole days
+    weekUsed = Object.entries(ledger.days)
+      .filter(([d]) => d >= dayKey(weekStart)).reduce((n, [, v]) => n + totalOf(v), 0);
+  }
+
+  // the number they actually want: what is 100%, in tokens, for this week
+  const implied = (weekUsed && pct) ? Math.round(weekUsed / (pct / 100)) : null;
+  const elapsed = weekStart ? (asOf - weekStart) / 864e5 : null;
+  const rate = (weekUsed && elapsed > 0) ? weekUsed / elapsed : null;
+  const projected = rate ? Math.round(rate * 7) : null;
+
+  const days = Object.entries(ledger.days).sort((a, b) => b[0].localeCompare(a[0])).map(([date, d]) => ({
+    date, ...d, total: totalOf(d),
+    pctOfWeek: implied ? +(totalOf(d) / implied * 100).toFixed(1) : null,
+    partial: ledger.since ? date < dayKey(ledger.since) : false,
+  }));
+
+  // past quota weeks, stepping back from the current window
+  const weeks = [];
+  if (weekStart) for (let i = 0; i < 6; i++) {
+    const a = weekStart - i * 7 * 864e5, b = a + 7 * 864e5;
+    const from = totalAt(samples, a), to = totalAt(samples, Math.min(b, now));
+    if (!from || !to || to.total === from.total) continue;
+    weeks.push({ from: new Date(a).toISOString(), to: new Date(b).toISOString(),
+                 used: to.total - from.total, current: i === 0 });
+  }
+
+  return {
+    now, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    week: {
+      startedAt: weekStart && new Date(weekStart).toISOString(),
+      resetsAt: resets && new Date(resets).toISOString(),
+      percentUsed: pct, tokensUsed: weekUsed, exact,
+      percentAsOf: new Date(asOf).toISOString(), percentIsLive: live,
+      note: pct == null ? (quotaErr || 'no plan percentage recorded yet - cannot derive a budget')
+          : live ? null : `percentage is from ${new Date(asOf).toLocaleString()} (${quotaErr})`,
+      impliedFullWeek: implied,
+      tokensRemaining: implied && weekUsed != null ? implied - weekUsed : null,
+      runRatePerDay: rate ? Math.round(rate) : null,
+      projectedFullWeek: projected,
+      projectedPercent: (projected && implied) ? Math.round(projected / implied * 100) : null,
+      exhaustedAt: (rate && implied) ? new Date(weekStart + implied / rate * 864e5).toISOString() : null,
+    },
+    days, weeks,
+    since: ledger.since && new Date(ledger.since).toISOString(),
+    samples: samples.length,
+  };
+}
+
+function correlate(sessions) {
+  const out = new Map();
+  for (const s of sessions) if (s.usage?.outbox?.length) out.set(s.pid, s.usage.outbox);
+  for (const s of sessions) for (const m of s.usage?.inbox || []) {
+    let best = null, gap = 12e4;                          // sender/receiver timestamps differ a little
+    for (const o of out.get(m.from) || []) {
+      const g = Math.abs(o.at - m.at);
+      if (g < gap) { gap = g; best = o }
+    }
+    m.summary = best?.summary || null;
+    m.text = best?.summary || m.body || best?.preview || null;
+  }
+  return sessions;
+}
+
+// The receiver's copy has the pid (so we know which two tiles) but not the summary; the
+// sender's SendMessage call has the summary. Join them on sender pid + nearby timestamp.
+function correlate(sessions) {
+  const out = new Map();
+  for (const s of sessions) if (s.usage?.outbox?.length) out.set(s.pid, s.usage.outbox);
+  for (const s of sessions) for (const m of s.usage?.inbox || []) {
+    let best = null, gap = 12e4;
+    for (const o of out.get(m.from) || []) {
+      const g = Math.abs(o.at - m.at);
+      if (g < gap) { gap = g; best = o }
+    }
+    m.text = best?.summary || m.body || best?.preview || null;
+    m.fromSender = !!best?.summary;
+  }
+  return sessions;
+}
+
+// report() re-reads the samples file, so don't rebuild it on every 2s poll
+let repAt = 0, repCache = null;
+const budget = () => {
+  if (Date.now() - repAt > 30e3) { repAt = Date.now(); try { repCache = report() } catch {} }
+  return repCache;
+};
 
 // SIGTERM, not SIGKILL: let the session flush its transcript and registry file.
 function killSession(pid) {
@@ -363,9 +606,12 @@ const server = http.createServer((req, res) => {
   } else if (killPid) {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify(killSession(Number(killPid[1]))));
+  } else if (req.url === '/log') {
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+    res.end(JSON.stringify(report(), null, 1));
   } else if (req.url === '/api') {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-    res.end(JSON.stringify({ sessions: scan(), rollup, quota: quota(), now: Date.now() }));
+    res.end(JSON.stringify({ sessions: correlate(scan()), rollup, quota: quota(), budget: budget(), now: Date.now() }));
   } else {
     res.writeHead(200, { 'content-type': 'text/html', 'cache-control': 'no-store' });
     fs.createReadStream(path.join(__dirname, 'claude-sessions.html')).pipe(res);
@@ -376,4 +622,5 @@ server.on('error', e => {
   if (e.code !== 'EADDRINUSE') throw e;
   server.listen(server.__port = (server.__port || PORT) + 1, HOST);
 });
-server.listen(PORT, HOST, () => console.log(`http://localhost:${server.address().port}`));
+if (!String(process.argv[2] || '').startsWith('--'))    // --report / --selftest must not bind a port
+  server.listen(PORT, HOST, () => console.log(`http://localhost:${server.address().port}`));

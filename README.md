@@ -34,12 +34,17 @@ sorted by tokens burned.
   `DAYS` days (default 7).
 - **Live plan usage** — your actual 5-hour and weekly limits as percentages, with reset
   times. See [Plan usage](#plan-usage) for how this works.
+- **Derived weekly budget** — what 100% is *in tokens*, how much is left, your run rate per
+  day, and whether you'll run dry before the reset. See [Weekly budget](#weekly-budget).
 
 **Interactions**
 - Click a tile to focus that session's terminal tab.
 - Hover a tile for a `compact` button — click once to arm, again to send `/compact`.
 - Hover for a `kill` button — sends SIGTERM after a confirmation prompt.
-- When one session messages another, an envelope flies between the two tiles.
+- When one session messages another, an envelope flies between the two tiles and opens into
+  the message summary — the one the sending agent wrote in its own `SendMessage` call, not a
+  generated one. It stays up for a computed reading time, pauses while you hover, and has a
+  close button.
 
 ## Requirements
 
@@ -56,6 +61,51 @@ sorted by tokens burned.
 | `PORT` | `7823` | Walks upward if taken. |
 | `HOST` | `127.0.0.1` | See [Security](#security) before changing this. |
 | `DAYS` | `7` | How far back the account-wide rollup reads transcripts. |
+
+## Files it writes
+
+Everything lands in `~/.switchboard/` — nothing is written near the repo.
+
+| File | |
+|---|---|
+| `ledger.json` | Cumulative tokens per local calendar day. Values only ratchet up. |
+| `samples.jsonl` | A row every 5 minutes pairing token totals with your plan percentage. ~26 KB/day, trimmed to 120 days. |
+| `quota-cache.json` | The last plan-usage response, so restarts don't re-hit the API. **Contains no credentials** — just the usage payload. |
+
+Delete the directory at any time; it rebuilds. You lose the day-by-day history, which cannot
+be reconstructed once transcripts age past the rollup window.
+
+## Weekly budget
+
+Anthropic reports a percentage, never a token count. Pairing the reported percentage with
+measured tokens gives you the missing number:
+
+```
+node claude-sessions.js --report
+```
+
+```
+quota week  21 Aug 1:30pm  ->  28 Aug 1:30pm   (Asia/Calcutta)
+  reported   71% used
+  measured   3270.9M tokens burned
+  => 100% is 4606.9M tokens
+  remaining  1336.0M
+  run rate   731.5M/day  ->  5120.8M by reset (111% of implied)
+  hits 100%  27 Aug, 8:38 pm
+```
+
+The same numbers appear live on the dashboard, and `/log` returns the whole thing as JSON
+including the per-day and per-week tables.
+
+**This is a yardstick, not a budget Anthropic would recognise.** It's raw token volume, and
+cache reads are the overwhelming majority of that — the real limit is near-certainly weighted
+by model and token type. It's useful because it's *consistent*: the same measurement week over
+week tells you whether you're trending over. It is not a number to quote at anyone.
+
+Two things degrade it: days recorded before you first ran the tool are only as complete as the
+7-day rollup could still see (marked `partial`), and a week with no sample from its start is
+summed from whole calendar days rather than measured precisely (`exact: false`). Both correct
+themselves once it has been running a full week.
 
 ## How the data refreshes
 
@@ -103,7 +153,9 @@ works without it.
 ## Security
 
 **This dashboard exposes the text of your prompts.** Tiles show the last user message and
-last assistant reply for every session. Treat the port like your terminal.
+last assistant reply for every session, and `/api` additionally carries the summaries and
+first ~700 characters of messages sessions send each other. That is real conversation content,
+not just counters. Treat the port like your terminal.
 
 - It binds to **loopback only**. Setting `HOST=0.0.0.0` publishes your prompts, working
   directories and session names to everyone on your network, with no authentication of
@@ -117,6 +169,8 @@ last assistant reply for every session. Treat the port like your terminal.
 - `/send` accepts an **allowlist** — `compact`, `context`, `cost`, `status` — and nothing
   else. It is not a general "type into my terminal" endpoint. The target pid must be live
   and present in the session registry, and its tty must match `^ttys?\d+$`.
+- `/api` and `/log` are read-only and send no `Access-Control-Allow-Origin`, so a foreign page
+  can issue the request but cannot read the response.
 - Every subprocess call uses `execFileSync` with an argument array. No shell.
 
 There is no authentication. The security model is entirely "loopback, and same-origin for
@@ -151,6 +205,17 @@ anything that acts".
 | `claude-sessions.js` | Server: registry scan, transcript parser, rollup, focus/send, quota. |
 | `claude-sessions.html` | The whole UI. Vanilla JS, no build. |
 | `claude-sessions.sh` | A `jq` one-liner that dumps the same session table to a terminal. |
+
+## Endpoints
+
+| | |
+|---|---|
+| `GET /` | The dashboard. |
+| `GET /api` | Everything the page polls, every 2s. |
+| `GET /log` | Daily and weekly usage tables plus the derived budget. |
+| `POST /focus?pid=` | Raise that session's terminal tab. |
+| `POST /send?pid=&cmd=` | Run an allowlisted slash command. |
+| `POST /kill?pid=` | SIGTERM that session. |
 
 ## License
 

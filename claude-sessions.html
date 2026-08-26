@@ -1,9 +1,12 @@
 <!doctype html><meta charset=utf-8><title>Claude Code sessions</title>
 <style>
   :root { color-scheme: light dark; --line: color-mix(in srgb, currentColor 16%, transparent);
-          --dim: color-mix(in srgb, currentColor 55%, transparent) }
+          --dim: color-mix(in srgb, currentColor 55%, transparent);
+          --bg: Canvas }   /* the browser paints the canvas behind the page, not on it, so a
+                              sticky element inherits nothing - name it to reuse it */
   * { box-sizing: border-box }
-  body { font: 15px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 2rem 2.5rem 4rem;
+  body { background: var(--bg);
+         font: 15px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 2rem 2.5rem 4rem;
          font-variant-numeric: tabular-nums }
   h1 { font-size: 1.05rem; font-weight: 600; margin: 0 0 1rem }
   h1 small { font-weight: 400; color: var(--dim) }
@@ -96,15 +99,52 @@
   details.more[open] > summary::before { transform: rotate(90deg) }
   details.more > summary:hover { color: var(--fg) }
 
+  #top { position: sticky; top: 0; z-index: 40; background: var(--bg);
+         padding-top: .6rem; margin-bottom: .6rem;
+         box-shadow: 0 6px 12px -8px rgba(0,0,0,.45) }
+  #top h1 { margin-top: 0 }
+  h2 { position: sticky; top: var(--toph, 0px); z-index: 30; background: var(--bg) }
+
+  #budget { display: flex; flex-wrap: wrap; align-items: baseline; gap: .3rem 1.5rem;
+            border: 1px solid var(--line); border-radius: .5rem; padding: .5rem .85rem;
+            margin: .1rem 0 .8rem; font-size: .82rem }
+  #budget .lead { font-weight: 700; font-size: .92rem }
+  #budget i { font-style: normal; color: var(--dim) }
+  #budget b { font-variant-numeric: tabular-nums }
+  #budget .over { color: #c9584f; font-weight: 700 }
+  #budget .under { color: #4c9a5a; font-weight: 700 }
+  #budget .cav { flex-basis: 100%; font-size: .72rem; color: var(--dim) }
+
+  .note { position: fixed; z-index: 48; width: min(26rem, 84vw);
+          max-height: min(22rem, 45vh); overflow-y: auto;      /* long body: scroll, never clip */
+          overscroll-behavior: contain;
+          border: 1px solid #6b8fd4; border-radius: .55rem; padding: .55rem .7rem .5rem;
+          background: var(--bg); box-shadow: 0 10px 28px -10px rgba(0,0,0,.6);
+          font-size: .82rem; line-height: 1.45 }
+  .note .nh { font-size: .72rem; color: var(--dim); margin-bottom: .3rem; display: flex; gap: .4rem;
+              align-items: baseline; white-space: nowrap; overflow: hidden }
+  .note .nh span { overflow: hidden; text-overflow: ellipsis }
+  .note .x { margin-left: auto; flex: none; cursor: pointer; font: inherit; font-size: .9rem;
+             line-height: 1; background: none; border: 0; color: var(--dim); padding: 0 .1rem }
+  .note .x:hover { color: #c9584f }
+  .note .nh b { color: #6b8fd4 }
+  .note .nh { position: sticky; top: 0; background: var(--bg); padding-bottom: .1rem }
+  .note .clock { position: sticky; bottom: 0; height: 2px; background: #6b8fd4; margin: .45rem -.7rem -.5rem;
+                 border-bottom-left-radius: .55rem; border-bottom-right-radius: .55rem }
+  @media (prefers-reduced-motion: reduce) { .note { display: none } }
+
   #toast { position: fixed; bottom: 1.4rem; left: 50%; transform: translateX(-50%);
            background: #1c1c1c; color: #f0f0f0; padding: .6rem 1rem; border-radius: .5rem;
            font-size: .82rem; opacity: 0; transition: opacity .2s; pointer-events: none }
   #toast.show { opacity: .96 }
 </style>
+<header id=top>
 <h1>Claude Code sessions <small id=summary></small></h1>
 <div class=bar id=bar></div>
 <div id=quota></div>
+<div id=budget></div>
 <div class=legend id=legend></div>
+</header>
 <div id=groups></div>
 <div id=toast></div>
 <script>
@@ -122,7 +162,8 @@ const esc = s => String(s ?? '').replace(/[<&"]/g, c => ({ '<': '&lt;', '&': '&a
 const tilde = p => (p || '').replace(/^\/Users\/[^/]+/, '~');
 const label = p => tilde(p).split('/').filter(Boolean).pop() || '~';
 const k = n => !n ? '0' : n < 1e3 ? String(n) : n < 1e6 ? (n / 1e3).toFixed(n < 1e4 ? 1 : 0) + 'k'
-                                              : (n / 1e6).toFixed(n < 1e7 ? 2 : 1) + 'M';
+                                              : n < 1e9 ? (n / 1e6).toFixed(n < 1e7 ? 2 : 1) + 'M'
+                                              : (n / 1e9).toFixed(2) + 'B';
 const ago = ms => { const s = (Date.now() - ms) / 1e3;
   return s < 60 ? `${s|0}s` : s < 3600 ? `${s/60|0}m` : s < 86400 ? `${s/3600|0}h` : `${s/86400|0}d` };
 const row = (dt, dd) => `<div><dt>${dt}</dt><dd>${dd}</dd></div>`;
@@ -141,6 +182,9 @@ function what(u, state) {
 // --- session -> session messages: fly an envelope between the two tiles -------------
 const seenMsg = new Set();
 let firstFlight = true;                       // don't replay the whole backlog on load
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) document.querySelectorAll('.mail, .trail').forEach(e => e.remove());
+});
 
 const centre = pid => {
   const el = document.querySelector(`.tile[data-pid="${pid}"]`);
@@ -152,7 +196,40 @@ const centre = pid => {
     y: Math.max(m, Math.min(innerHeight - m, b.top + b.height / 2)) };
 };
 
-function fly(from, to, label) {
+let openNotes = 0;
+function openNote(x, y, from, to, text) {
+  const words = String(text).trim().split(/\s+/).length;
+  const ms = Math.min(20e3, Math.max(8e3, words / 3.3 * 1e3 + 2e3));   // ~200wpm + a beat
+  const n = document.createElement('div');
+  n.className = 'note';
+  n.innerHTML = `<div class=nh><span>✉ <b>${esc(from)}</b> → ${esc(to)}</span>`
+              + `<button class=x title="close">×</button></div>`
+              + `<div>${esc(text)}</div><div class=clock></div>`;
+  document.body.append(n);
+
+  // land on the tile, but never off-screen - x/y are already clamped to the viewport
+  const b = n.getBoundingClientRect(), m = 12, stack = (openNotes++ % 4) * 16;
+  n.style.left = Math.max(m, Math.min(innerWidth - b.width - m, x - b.width / 2)) + 'px';
+  n.style.top = Math.max(m, Math.min(innerHeight - b.height - m, y - b.height / 2 + stack)) + 'px';
+
+  n.animate([{ opacity: 0, transform: 'scale(.7)' }, { opacity: 1, transform: 'scale(1)' }],
+    { duration: 220, easing: 'ease-out' });
+  const clock = n.querySelector('.clock').animate([{ width: '100%' }, { width: '0%' }],
+    { duration: ms, easing: 'linear' });
+
+  let t = setTimeout(close, ms);
+  function close() {
+    if (!n.isConnected) return;
+    openNotes--; clearTimeout(t);
+    n.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 200 }).onfinish = () => n.remove();
+  }
+  // hovering to read (or select the text) shouldn't race the countdown
+  n.onmouseenter = () => { clearTimeout(t); clock.pause() };
+  n.onmouseleave = () => { clock.play(); t = setTimeout(close, ms - clock.currentTime) };
+  n.querySelector('.x').onclick = close;
+}
+
+function fly(from, to, label, text) {
   const a = centre(from), b = centre(to);
   if (!a || !b) return;                       // sender or receiver not on screen - skip
   const dx = b.x - a.x, dy = b.y - a.y;
@@ -173,24 +250,30 @@ function fly(from, to, label) {
     { transform: `translate(${a.x}px, ${a.y}px) scale(.5)`, opacity: 0 },
     { transform: `translate(${a.x + dx * .5}px, ${a.y + dy * .5 - arc}px) scale(1)`, opacity: 1, offset: .5 },
     { transform: `translate(${b.x}px, ${b.y}px) scale(.5)`, opacity: 0 },
-  ], { duration: dur, easing: 'ease-in-out' }).onfinish = () => {
-    mail.remove();
-    if (b.offscreen) return;
+  ], { duration: dur, easing: 'ease-in-out' });
+  trail.animate([{ opacity: 0 }, { opacity: .55, offset: .4 }, { opacity: 0 }],
+    { duration: dur, easing: 'ease-out' });
+
+  setTimeout(() => {
+    mail.remove(); trail.remove();
+    if (text) openNote(b.x, b.y, ...String(label).split(' → '), text);   // b is clamped, so still visible
+    if (b.offscreen || !b.el.isConnected) return;
     b.el.classList.add('landed');
     setTimeout(() => b.el.classList.remove('landed'), 900);
-  };
-  trail.animate([{ opacity: 0 }, { opacity: .55, offset: .4 }, { opacity: 0 }],
-    { duration: dur, easing: 'ease-out' }).onfinish = () => trail.remove();
+  }, dur);
 }
 
 function flights(sessions) {
+  // a hidden tab freezes animations; flying now would just pile up invisible elements and
+  // burn the message. leave them unseen - they replay when the tab comes back.
+  if (document.hidden) return;
   const name = new Map(sessions.map(s => [s.pid, s.name]));
   for (const s of sessions) for (const m of s.usage?.inbox || []) {
     const key = `${s.pid}:${m.at}`;
     if (seenMsg.has(key)) continue;
     seenMsg.add(key);
     if (firstFlight || Date.now() - m.at > 12e4) continue;   // only animate genuinely fresh traffic
-    fly(m.from, s.pid, `${name.get(m.from) || m.name || m.from} → ${s.name}`);
+    fly(m.from, s.pid, `${name.get(m.from) || m.name || m.from} → ${s.name}`, m.text);
   }
   firstFlight = false;
 }
@@ -200,6 +283,28 @@ document.addEventListener('toggle', e => {
   const t = e.target.closest?.('.tile'); if (!t || !e.target.matches('details.more')) return;
   e.target.open ? openTiles.add(t.dataset.pid) : openTiles.delete(t.dataset.pid);
 }, true);                                     // 'toggle' does not bubble - capture instead
+
+// derived weekly budget: reported % paired with measured tokens
+function renderBudget(b) {
+  const el = document.getElementById('budget'), w = b?.week;
+  if (!w?.impliedFullWeek) { el.style.display = 'none'; return }
+  el.style.display = 'flex';
+  const reset = w.resetsAt && new Date(w.resetsAt), out = w.exhaustedAt && new Date(w.exhaustedAt);
+  const over = out && reset && out < reset;                 // runs dry before the week rolls over
+  const short = d => d.toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+  const gap = out && reset ? Math.abs(reset - out) / 36e5 : null;
+  el.innerHTML = `
+    <span class=lead>100% ≈ ${k(w.impliedFullWeek)} tokens this week</span>
+    <span><b>${k(w.tokensUsed)}</b> <i>used (${w.percentUsed}%)</i></span>
+    <span><b>${k(w.tokensRemaining)}</b> <i>left</i></span>
+    <span><b>${k(w.runRatePerDay)}</b><i>/day run rate</i></span>
+    <span><b>${k(w.projectedFullWeek)}</b> <i>projected =</i> <b class="${over ? 'over' : 'under'}">${w.projectedPercent}%</b></span>
+    ${out ? `<span class="${over ? 'over' : 'under'}">${over ? `runs out ${short(out)}` : `resets first ${short(reset)}`}</span>
+             <i>${gap != null ? `${gap < 24 ? Math.round(gap) + 'h' : Math.round(gap / 24) + 'd'} ${over ? 'before reset' : 'to spare'}` : ''}</i>` : ''}
+    <span class=cav>derived: measured tokens ÷ reported %. Raw volume, dominated by cache reads — a
+      relative yardstick, not Anthropic's own weighting.${w.exact ? '' : ' This week is approximate: no sample from week start.'}${
+      w.percentIsLive ? '' : ` ${esc(w.note || '')}`}</span>`;
+}
 
 function tile(r) {
   const state = !r.alive ? 'stale' : (r.status || 'unknown');
@@ -273,9 +378,10 @@ function renderQuota(q) {
 }
 
 async function tick() {
-  const { sessions, rollup, quota } = await (await fetch('/api')).json();
+  const { sessions, rollup, quota, budget } = await (await fetch('/api')).json();
   renderQuota(quota);
-  const today = rollup.days[new Date().toISOString().slice(0, 10)] || {};
+  renderBudget(budget);
+  const d0 = new Date(), today = rollup.days[new Date(d0 - d0.getTimezoneOffset() * 6e4).toISOString().slice(0, 10)] || {};
   const sum = f => sessions.reduce((n, s) => n + (s.usage ? f(s.usage) : 0), 0);
 
   document.getElementById('summary').textContent =
@@ -302,6 +408,8 @@ async function tick() {
       <small>${rs.length} session${rs.length > 1 ? 's' : ''} · ${k(spent(rs))} tokens</small></h2>
      <div class=grid>${rs.map(tile).join('')}</div>`).join('');
   flights(sessions);
+  document.documentElement.style.setProperty('--toph',
+    document.getElementById('top').offsetHeight + 'px');
 }
 
 const toast = m => { const t = document.getElementById('toast');
