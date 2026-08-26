@@ -39,7 +39,7 @@ const blank = () => ({
   msgs: 0, turns: 0, tools: 0, byTool: {}, sidechain: 0, ctx: 0, daily: {},
   model: null, effort: null, branch: null, lastAt: 0,
   summary: null, lastUser: null, lastAssistant: null, lastTool: null, lastToolAt: 0,
-  inbox: [], outbox: [], outbox: [],
+  inbox: [], outbox: [], pat: {}, outbox: [],
 });
 
 function usage(file) {
@@ -76,6 +76,19 @@ const clip = (t, n = 700) => {
 const text = m => (typeof m?.content === 'string' ? m.content
   : (m?.content || []).filter(b => b.type === 'text').map(b => b.text).join(' ')).trim();
 
+const bump = (o, k) => { if (k != null) o[k] = (o[k] || 0) + 1 };
+const patDay = (st, ts) => st.pat[dayKey(ts)] ??=
+  { hour: {}, dow: {}, tool: {}, model: {}, effort: {}, prompts: 0, chars: 0, interrupts: 0 };
+function mergePat(into, from) {
+  for (const [day, p] of Object.entries(from)) {
+    const t = into[day] ??= { hour: {}, dow: {}, tool: {}, model: {}, effort: {}, prompts: 0, chars: 0, interrupts: 0 };
+    for (const k of ['hour', 'dow', 'tool', 'model', 'effort'])
+      for (const [x, n] of Object.entries(p[k])) t[k][x] = (t[k][x] || 0) + n;
+    t.prompts += p.prompts; t.chars += p.chars; t.interrupts += p.interrupts;
+  }
+  return into;
+}
+
 function ingest(st, e) {
   // claude code writes its own auto-generated session title as a bare record - no .message
   if (e.type === 'summary' && e.summary) st.summary = e.summary;
@@ -89,6 +102,7 @@ function ingest(st, e) {
   if (Array.isArray(c)) for (const p of c) if (p.type === 'tool_use') {
     st.tools++; st.byTool[p.name] = (st.byTool[p.name] || 0) + 1;
     st.lastTool = p.name; st.lastToolAt = ts;                        // best "doing right now" signal
+    if (ts) bump(patDay(st, ts).tool, p.name);
     if (p.name === 'SendMessage') {
       st.outbox.push({ at: ts, to: p.input?.to ?? null, summary: p.input?.summary || null,
                        preview: clip(p.input?.message) });
@@ -108,13 +122,25 @@ function ingest(st, e) {
   }
   // a real user turn: a user message that is prose, not a tool result being fed back
   if (e.type === 'user' && !e.isSidechain &&
-      (typeof c === 'string' || (Array.isArray(c) && c.some(p => p.type === 'text')))) st.turns++;
+      (typeof c === 'string' || (Array.isArray(c) && c.some(p => p.type === 'text')))) {
+    st.turns++;
+    const txt = text(e.message), d = ts && patDay(st, ts);
+    if (d && txt) {
+      if (txt.startsWith('[Request interrupted')) d.interrupts++;
+      else if (!NOISE.test(txt)) {                                   // count what you actually typed
+        d.prompts++; d.chars += txt.length;
+        const at = new Date(ts);
+        bump(d.hour, at.getHours()); bump(d.dow, at.getDay());
+      }
+    }
+  }
 
   const u = e.message?.usage;
   if (!u || st.ids.has(e.message.id)) return;                        // <-- the dedup
   st.ids.add(e.message.id);
   st.msgs++;
   if (e.message.model) st.model = e.message.model;
+  if (ts) { const d = patDay(st, ts); bump(d.model, e.message.model); bump(d.effort, st.effort) }
   st.tok.input += u.input_tokens || 0;
   st.tok.output += u.output_tokens || 0;
   st.tok.cacheWrite += u.cache_creation_input_tokens || 0;
@@ -146,7 +172,8 @@ function rollupPass() {
         const fp = path.join(PROJECTS, d.name, f);
         try { if (fs.statSync(fp).mtimeMs > cutoff) files.push(fp) } catch {}
       }
-  const days = {}, next = { days, files: files.length, sessions: 0, scanning: true, done: 0, at: Date.now() };
+  const days = {}, pat = {};
+  const next = { days, pat, files: files.length, sessions: 0, scanning: true, done: 0, at: Date.now() };
   rollup = { ...rollup, files: files.length, scanning: true, done: 0 };
   let i = 0;
   (function step() {
@@ -154,6 +181,7 @@ function rollupPass() {
       try {
         const st = usage(files[i]);
         if (st.msgs) next.sessions++;
+        mergePat(pat, st.pat);
         for (const [day, t] of Object.entries(st.daily)) {
           const acc = days[day] ??= { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, msgs: 0 };
           for (const k of Object.keys(acc)) acc[k] += t[k] || 0;
@@ -177,7 +205,33 @@ const scan = () => !fs.existsSync(SESSIONS) ? [] : fs.readdirSync(SESSIONS).filt
 }).filter(Boolean).sort((a, b) => (b.alive - a.alive) || (b.startedAt - a.startedAt));
 
 // --- self-check: incremental parse must equal a one-shot parse, and repeat polls must not drift
-if (process.argv[2] === '--report') {
+if (process.argv[2] === '--patterns') {
+  setTimeout(() => {
+    const h = habits(Number(process.argv[3]) || 90);
+    if (!h.prompts) { console.log('\nNo prompts recorded yet. Let the server run through a rollup pass first.\n'); process.exit(0) }
+    const bar = (n, max, w = 26) => '\u2588'.repeat(Math.max(n > 0 ? 1 : 0, Math.round(n / max * w)));
+    console.log(`\nHow you use Claude Code  (${h.activeDays} active days since ${h.since})\n`);
+    console.log(`  ${h.prompts} prompts  ·  ${h.promptsPerActiveDay}/day  ·  ~${h.avgPromptChars} chars each`);
+    console.log(`  ${h.interrupts} interruptions (${h.interruptRate}% of turns you cut short)`);
+    if (h.concurrency) console.log(`  ${h.concurrency.median} sessions at once typically, peak ${h.concurrency.max}`);
+
+    const hv = Object.values(h.byHour), hm = Math.max(...hv);
+    console.log('\n  by hour');
+    for (let i = 0; i < 24; i += 1) if (hv[i]) console.log(`   ${String(i).padStart(2, '0')}h ${bar(hv[i], hm).padEnd(26)} ${hv[i]}`);
+
+    const dv = Object.entries(h.byDow), dm = Math.max(...dv.map(x => x[1]));
+    console.log('\n  by weekday');
+    for (const [d, n] of dv) console.log(`   ${d} ${bar(n, dm).padEnd(26)} ${n}`);
+
+    const tm = h.topTools[0]?.[1] || 1;
+    console.log('\n  tools you lean on');
+    for (const [n, c] of h.topTools) console.log(`   ${n.replace(/^mcp__[^_]+__/, '').slice(0, 22).padEnd(23)} ${bar(c, tm, 18).padEnd(18)} ${c}`);
+
+    console.log('\n  models   ' + h.models.map(([m, n]) => `${m.replace('claude-', '')} ${n}`).join('  ·  '));
+    console.log('  effort   ' + (h.effort.map(([e, n]) => `${e} ${n}`).join('  ·  ') || '—') + '\n');
+    process.exit(0);
+  }, 4000);
+} else if (process.argv[2] === '--report') {
   const m = n => n == null ? '—' : (n / 1e6).toFixed(1) + 'M';
   const d = iso => iso ? new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—';
   setTimeout(() => {
@@ -405,6 +459,7 @@ const quota = () => {
 // accumulated here instead. Values only ever ratchet up: a later pass that reads fewer
 // transcripts must not shrink a day that was already recorded.
 const LEDGER = path.join(DATA, 'ledger.json');
+const PATTERNS = path.join(DATA, 'patterns.json');
 const SAMPLES = path.join(DATA, 'samples.jsonl');
 const SAMPLE_EVERY = 5 * 60e3;
 const FIELDS = ['input', 'output', 'cacheWrite', 'cacheRead', 'msgs'];
@@ -412,6 +467,8 @@ const totalOf = d => (d.input || 0) + (d.output || 0) + (d.cacheWrite || 0) + (d
 
 let ledger = { since: null, days: {} };
 try { ledger = JSON.parse(fs.readFileSync(LEDGER, 'utf8')) } catch {}
+let patterns = { days: {} };
+try { patterns = JSON.parse(fs.readFileSync(PATTERNS, 'utf8')) } catch {}
 const ledgerTotal = () => Object.values(ledger.days).reduce((n, d) => n + totalOf(d), 0);
 
 let sampledAt = 0;
@@ -424,11 +481,17 @@ function sample() {
     const cur = ledger.days[day] ??= { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, msgs: 0 };
     for (const k of FIELDS) cur[k] = Math.max(cur[k] || 0, t[k] || 0);
   }
+  // a day only ever gains records, so keep whichever pass saw more of it
+  for (const [day, p] of Object.entries(rollup.pat || {})) {
+    const old = patterns.days[day];
+    if (!old || p.prompts + p.interrupts >= old.prompts + old.interrupts) patterns.days[day] = p;
+  }
   try {
     fs.mkdirSync(DATA, { recursive: true });
     fs.writeFileSync(LEDGER, JSON.stringify(ledger));
+    fs.writeFileSync(PATTERNS, JSON.stringify(patterns));
     fs.appendFileSync(SAMPLES, JSON.stringify({
-      t: sampledAt, total: ledgerTotal(),
+      t: sampledAt, total: ledgerTotal(), live: scan().filter(x => x.alive).length,
       week: quotaGood?.seven_day?.utilization ?? null,
       resets: quotaGood?.seven_day?.resets_at ?? null,
     }) + '\n');
@@ -508,8 +571,24 @@ function report() {
                  used: to.total - from.total, current: i === 0 });
   }
 
+  // sample-derived weeks need a sample from each boundary; this always works, at the cost
+  // of snapping to whole local days rather than the exact mid-day quota boundary
+  const weekly = [];
+  const dates = Object.keys(ledger.days).sort();
+  if (weekStart && dates.length) {
+    const first = Date.parse(dates[0] + 'T00:00:00');
+    for (let a = weekStart; a + 7 * 864e5 > first; a -= 7 * 864e5) {
+      const from = dayKey(a), to = dayKey(a + 7 * 864e5 - 1);
+      let used = 0, n = 0;
+      for (const [d, v] of Object.entries(ledger.days))
+        if (d >= from && d <= to) { used += totalOf(v); n++ }
+      if (n) weekly.push({ from, to, used, days: n, current: a === weekStart });
+    }
+  }
+
   return {
     now, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    weekly,
     week: {
       startedAt: weekStart && new Date(weekStart).toISOString(),
       resetsAt: resets && new Date(resets).toISOString(),
@@ -562,7 +641,49 @@ function correlate(sessions) {
   return sessions;
 }
 
+// Claude Code fires "Claude is waiting for your input" only after the session has been
+// quiet for messageIdleNotifThresholdMs (default 60s), not at the busy->idle flip.
+let idleMs = 0, idleMsAt = 0;
+function idleNotifMs() {
+  if (Date.now() - idleMsAt < 60e3) return idleMs;
+  idleMsAt = Date.now(); idleMs = 60e3;
+  for (const f of [path.join(HOME, '.claude', 'settings.json'), path.join(HOME, '.claude.json')]) {
+    try {
+      const v = JSON.parse(fs.readFileSync(f, 'utf8')).messageIdleNotifThresholdMs;
+      if (Number(v) > 0) { idleMs = Number(v); break }
+    } catch {}
+  }
+  return idleMs;
+}
+
 // report() re-reads the samples file, so don't rebuild it on every 2s poll
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+function habits(days = 90) {
+  const cutoff = dayKey(Date.now() - days * 864e5);
+  const t = { hour: {}, dow: {}, tool: {}, model: {}, effort: {}, prompts: 0, chars: 0, interrupts: 0 };
+  let active = 0;
+  for (const [day, p] of Object.entries(patterns.days)) {
+    if (day < cutoff) continue;
+    active++;
+    for (const k of ['hour', 'dow', 'tool', 'model', 'effort'])
+      for (const [x, n] of Object.entries(p[k] || {})) t[k][x] = (t[k][x] || 0) + n;
+    t.prompts += p.prompts || 0; t.chars += p.chars || 0; t.interrupts += p.interrupts || 0;
+  }
+  const top = (o, n) => Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, n);
+  const conc = readSamples().map(s => s.live).filter(n => n > 0).sort((a, b) => a - b);
+  return {
+    since: Object.keys(patterns.days).sort()[0] || null, activeDays: active,
+    prompts: t.prompts, interrupts: t.interrupts,
+    interruptRate: t.prompts ? +(t.interrupts / (t.prompts + t.interrupts) * 100).toFixed(1) : null,
+    avgPromptChars: t.prompts ? Math.round(t.chars / t.prompts) : null,
+    promptsPerActiveDay: active ? +(t.prompts / active).toFixed(1) : null,
+    byHour: Object.fromEntries(Array.from({ length: 24 }, (_, h) => [h, t.hour[h] || 0])),
+    byDow: Object.fromEntries(DOW.map((d, i) => [d, t.dow[i] || 0])),
+    topTools: top(t.tool, 10), models: top(t.model, 6), effort: top(t.effort, 4),
+    concurrency: conc.length ? { median: conc[conc.length >> 1], max: conc[conc.length - 1] } : null,
+  };
+}
+
 let repAt = 0, repCache = null;
 const budget = () => {
   if (Date.now() - repAt > 30e3) { repAt = Date.now(); try { repCache = report() } catch {} }
@@ -606,12 +727,15 @@ const server = http.createServer((req, res) => {
   } else if (killPid) {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify(killSession(Number(killPid[1]))));
+  } else if (req.url === '/patterns') {
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+    res.end(JSON.stringify(habits(), null, 1));
   } else if (req.url === '/log') {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify(report(), null, 1));
   } else if (req.url === '/api') {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-    res.end(JSON.stringify({ sessions: correlate(scan()), rollup, quota: quota(), budget: budget(), now: Date.now() }));
+    res.end(JSON.stringify({ sessions: correlate(scan()), rollup, quota: quota(), budget: budget(), idleNotifMs: idleNotifMs(), now: Date.now() }));
   } else {
     res.writeHead(200, { 'content-type': 'text/html', 'cache-control': 'no-store' });
     fs.createReadStream(path.join(__dirname, 'claude-sessions.html')).pipe(res);

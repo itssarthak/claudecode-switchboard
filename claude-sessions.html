@@ -25,7 +25,8 @@
   .key > span:last-child { color: var(--dim) }
 
   .grid { display: grid; gap: .7rem; grid-template-columns: repeat(auto-fit, minmax(16rem, 21rem)) }
-  .tile { border: 1px solid var(--c, var(--line)); border-radius: .6rem; padding: .85rem .95rem;
+  .tile { position: relative;
+          border: 1px solid var(--c, var(--line)); border-radius: .6rem; padding: .85rem .95rem;
           background: color-mix(in srgb, var(--c) 5%, transparent);
           cursor: pointer; transition: transform .08s ease, background .15s }
   .tile:hover { transform: translateY(-2px); background: color-mix(in srgb, var(--c) 14%, transparent) }
@@ -39,6 +40,19 @@
           color: #c9584f; padding: .05rem .35rem; opacity: 0; transition: opacity .15s }
   .tile:hover .kill { opacity: 1 }
   .kill:hover { border-color: #c9584f; background: color-mix(in srgb, #c9584f 12%, transparent) }
+  /* in the name row this truncated the session name, so float it in the corner instead;
+     it hides on hover to make room for the compact/kill buttons */
+  .wait { position: absolute; top: .55rem; right: .6rem; z-index: 1;
+          font-size: .64rem; padding: .1rem .45rem; border-radius: 999px;
+          transition: opacity .15s; white-space: nowrap;
+          border: 1px solid color-mix(in srgb, var(--c) 45%, transparent);
+          background: color-mix(in srgb, var(--c) 16%, transparent); color: var(--c) }
+  .tile:hover .wait { opacity: 0; pointer-events: none }
+  .wait.stall { border-color: #c9584f; color: #c9584f;
+                background: color-mix(in srgb, #c9584f 16%, transparent) }
+  .wait.fresh { animation: breathe 2.2s ease-in-out infinite }
+  @keyframes breathe { 50% { opacity: .45 } }
+  @media (prefers-reduced-motion: reduce) { .wait.fresh { animation: none } }
   .cmd { margin-left: auto; flex: none; font: inherit; font-size: .68rem; cursor: pointer;
          border: 1px solid var(--line); border-radius: .3rem; padding: .05rem .4rem;
          background: transparent; color: var(--dim); opacity: 0; transition: opacity .15s }
@@ -133,6 +147,30 @@
                  border-bottom-left-radius: .55rem; border-bottom-right-radius: .55rem }
   @media (prefers-reduced-motion: reduce) { .note { display: none } }
 
+  #spend, #habits { margin-top: 2.2rem; border-top: 1px solid var(--line); padding-top: 1rem }
+  #spend > summary, #habits > summary { cursor: pointer; font-weight: 700; list-style: none; margin-bottom: .3rem }
+  #spend > summary::-webkit-details-marker, #habits > summary::-webkit-details-marker { display: none }
+  #spend > summary::before, #habits > summary::before { content: '▸ '; display: inline-block; transition: transform .15s }
+  #spend[open] > summary::before, #habits[open] > summary::before { transform: rotate(90deg) }
+  #spend > summary small, #habits > summary small { font-weight: 400; color: var(--dim); font-size: .8rem; margin-left: .5rem }
+  .hgrid { display: grid; gap: 1.4rem 2.4rem; margin-top: .8rem;
+           grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)) }
+  .hgrid h3 { font-size: .78rem; margin: 0 0 .5rem; color: var(--dim); font-weight: 600 }
+  .hcard.wide { grid-column: 1 / -1 }
+  .brow { display: grid; grid-template-columns: var(--lab, 3.1rem) 1fr 3.2rem; align-items: center;
+          gap: .5rem; font-size: .76rem; line-height: 1.7 }
+  .hcard.labels { --lab: 9.5rem }        /* tool names need far more room than "00h" */
+  .brow i { font-style: normal; color: var(--dim);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+  .brow .t { height: .52rem; border-radius: .26rem; background: var(--line) }
+  .brow .t > b { display: block; height: 100%; border-radius: .26rem; background: #4c9a5a }
+  .brow .n { text-align: right; font-variant-numeric: tabular-nums; color: var(--dim) }
+  .brow.peak .t > b { background: #d99a45 }
+  .brow.part .t > b { opacity: .45 }
+  .chips { display: flex; flex-wrap: wrap; gap: .35rem }
+  .chip { font-size: .73rem; border: 1px solid var(--line); border-radius: 999px; padding: .1rem .55rem }
+  .chip b { font-variant-numeric: tabular-nums }
+
   #toast { position: fixed; bottom: 1.4rem; left: 50%; transform: translateX(-50%);
            background: #1c1c1c; color: #f0f0f0; padding: .6rem 1rem; border-radius: .5rem;
            font-size: .82rem; opacity: 0; transition: opacity .2s; pointer-events: none }
@@ -146,6 +184,8 @@
 <div class=legend id=legend></div>
 </header>
 <div id=groups></div>
+<details id=spend open><summary>Tokens spent <small></small></summary><div class=hgrid></div></details>
+<details id=habits open><summary>How you use Claude Code <small></small></summary><div class=hgrid></div></details>
 <div id=toast></div>
 <script>
 const STATES = {
@@ -306,6 +346,18 @@ function renderBudget(b) {
       w.percentIsLive ? '' : ` ${esc(w.note || '')}`}</span>`;
 }
 
+// Matches Claude Code's own idle_prompt notification: quiet for at least the configured
+// threshold (default 60s), not merely idle.
+let IDLE_MS = 60e3;
+const waiting = r => r.alive && r.status === 'idle' && r.statusUpdatedAt > 0
+                  && Date.now() - r.statusUpdatedAt >= IDLE_MS;
+
+// A permission prompt happens mid-turn, so the session still reports busy. Claude Code
+// writes no blocked state anywhere, but a blocked session is busy while writing nothing
+// and burning nothing - that gap is the only local signal there is.
+const stalled = r => r.alive && r.status === 'busy' && r.usage?.lastAt
+                  && Date.now() - r.usage.lastAt >= IDLE_MS && !r.usage.burn;
+
 function tile(r) {
   const state = !r.alive ? 'stale' : (r.status || 'unknown');
   const u = r.usage;
@@ -315,6 +367,12 @@ function tile(r) {
   return `<div class="tile ${state} ${r.alive ? '' : 'dead'}" data-pid="${r.pid}"
        title="${esc(r.sessionId)}\n${esc(r.cwd)}\nclick to focus this terminal">
     <div class=name><span class=dot>●</span><span class=txt>${esc(r.name || r.sessionId?.slice(0, 8))}</span>${
+      stalled(r) ? `<span class="wait stall fresh"
+                    title="busy, but nothing written and no tokens burned for ${ago(r.usage.lastAt)} — most likely sitting on a permission prompt"
+                    >stalled ${ago(r.usage.lastAt)}</span>`
+      : waiting(r) ? `<span class="wait ${Date.now() - r.statusUpdatedAt < 36e5 ? 'fresh' : ''}"
+                    title="quiet for ${ago(r.statusUpdatedAt)} — Claude Code has notified you it is waiting for input"
+                    >waiting ${ago(r.statusUpdatedAt)}</span>` : ''}${
       r.alive ? `<button class=cmd data-cmd=compact>compact</button>
                  <button class=kill title="send SIGTERM to pid ${r.pid}">kill</button>` : ''}</div>
     <div class=sub>${state} · pid ${r.pid}${r.startedAt ? ` · up ${ago(r.startedAt)}` : ''}${
@@ -377,15 +435,87 @@ function renderQuota(q) {
     ? `<div class="q normal"><div class=qh><span>Extra usage</span><b>${q.extra_usage.utilization ?? 0}%</b></div></div>` : '');
 }
 
+// --- usage patterns: slow-moving, so on its own 60s cycle rather than the 2s poll --------
+const bars = (pairs, fmt = k => k, vfmt = k2, mark = () => null) => {
+  const max = Math.max(...pairs.map(p => p[1]), 1);
+  return pairs.map(([k, v]) => {
+    const m = mark(k);                                        // [extraClass, tooltip] or null
+    return `<div class="brow ${v === max ? 'peak' : ''} ${m?.[0] || ''}" title="${esc(m?.[1] || '')}">
+      <i>${esc(fmt(k))}</i>
+      <span class=t><b style="width:${v / max * 100}%"></b></span>
+      <span class=n>${v ? vfmt(v) : ''}</span></div>`;
+  }).join('');
+};
+const k2 = n => n < 1000 ? String(n) : (n / 1000).toFixed(1) + 'k';
+
+async function renderHabits() {
+  let h; try { h = await (await fetch('/patterns')).json() } catch { return }
+  const box = document.getElementById('habits');
+  if (!h?.prompts) { box.style.display = 'none'; return }
+  box.style.display = '';
+  box.querySelector('summary small').textContent =
+    `${h.prompts} prompts over ${h.activeDays} active days · ${h.promptsPerActiveDay}/day`;
+
+  const hours = Object.entries(h.byHour).map(([k, v]) => [+k, v]).filter(([, v]) => v > 0);
+  const hourRows = bars(hours, k => String(k).padStart(2, '0') + 'h');
+
+  box.querySelector('.hgrid').innerHTML = `
+    <div class="hcard wide"><h3>when you work — local hour</h3>${hourRows}</div>
+    <div class=hcard><h3>by weekday</h3>${bars(Object.entries(h.byDow))}</div>
+    <div class="hcard labels"><h3>tools you lean on</h3>${
+      bars(h.topTools.map(([n, c]) => [n.replace(/^mcp__[^_]+__/, ''), c]))}</div>
+    <div class=hcard><h3>how you prompt</h3>
+      <div class=chips>
+        <span class=chip>~<b>${h.avgPromptChars}</b> chars per prompt</span>
+        <span class=chip><b>${h.interruptRate}%</b> of turns interrupted</span>
+        ${h.concurrency ? `<span class=chip><b>${h.concurrency.median}</b> sessions at once (peak <b>${h.concurrency.max}</b>)</span>` : ''}
+      </div>
+      <h3 style="margin-top:.9rem">models</h3>
+      <div class=chips>${h.models.map(([m, n]) => `<span class=chip>${esc(m.replace('claude-', ''))} <b>${k2(n)}</b></span>`).join('')}</div>
+      <h3 style="margin-top:.9rem">effort</h3>
+      <div class=chips>${h.effort.map(([e, n]) => `<span class=chip>${esc(e)} <b>${k2(n)}</b></span>`).join('') || '<span class=chip>—</span>'}</div>
+    </div>`;
+}
+renderHabits();
+setInterval(renderHabits, 60e3);
+
+// --- tokens spent per day / per week ---------------------------------------------------
+async function renderSpend() {
+  let r; try { r = await (await fetch('/log')).json() } catch { return }
+  const box = document.getElementById('spend');
+  if (!r?.days?.length) { box.style.display = 'none'; return }
+  box.style.display = '';
+
+  const days = r.days.slice(0, 30).reverse();                  // oldest -> newest
+  const partial = new Set(days.filter(d => d.partial).map(d => d.date));
+  const total = r.days.reduce((n, d) => n + d.total, 0);
+  box.querySelector('summary small').textContent =
+    `${k(total)} over ${r.days.length} days · ${k(Math.round(total / r.days.length))}/day average`;
+
+  const dayRows = bars(days.map(d => [d.date, d.total]), s => s.slice(5), k,
+    s => partial.has(s) ? ['part', 'partial — predates the ledger, so it may undercount'] : null);
+  const weekRows = bars((r.weekly || []).slice().reverse().map(w => [w.from, w.used]), s => s.slice(5), k,
+    s => [null, `week of ${s}`]);
+
+  box.querySelector('.hgrid').innerHTML = `
+    <div class="hcard wide"><h3>per day — last ${days.length}</h3>${dayRows}</div>
+    ${weekRows ? `<div class="hcard wide"><h3>per quota week</h3>${weekRows}</div>` : ''}`;
+}
+renderSpend();
+setInterval(renderSpend, 60e3);
+
 async function tick() {
-  const { sessions, rollup, quota, budget } = await (await fetch('/api')).json();
+  const { sessions, rollup, quota, budget, idleNotifMs } = await (await fetch('/api')).json();
+  if (idleNotifMs > 0) IDLE_MS = idleNotifMs;
   renderQuota(quota);
   renderBudget(budget);
   const d0 = new Date(), today = rollup.days[new Date(d0 - d0.getTimezoneOffset() * 6e4).toISOString().slice(0, 10)] || {};
   const sum = f => sessions.reduce((n, s) => n + (s.usage ? f(s.usage) : 0), 0);
 
+  const wait = sessions.filter(waiting).length, stall = sessions.filter(stalled).length;
   document.getElementById('summary').textContent =
-    `— ${sessions.filter(s => s.alive).length} live in ${new Set(sessions.map(s => s.cwd)).size} projects`;
+    `— ${sessions.filter(s => s.alive).length} live in ${new Set(sessions.map(s => s.cwd)).size} projects`
+    + (wait ? ` · ${wait} waiting on you` : '') + (stall ? ` · ${stall} stalled` : '');
   document.getElementById('bar').innerHTML = [
     [k(sum(u => u.burn)), 'output, last 5 min', 'across every live session'],
     [k(sum(u => u.ctx)), 'held in context', 'sum of every session window'],

@@ -28,6 +28,9 @@ sorted by tokens burned.
 - Tokens: 5-minute burn rate and lifetime total, with output / input / cache read /
   cache write / thinking, turn counts and top tools behind a `▸ breakdown` toggle.
 - Model, reasoning effort, and git branch.
+- A **`waiting 5m`** bubble once a session has been quiet long enough that Claude Code has
+  notified you, or a red **`stalled 5m`** when it is busy while writing nothing and burning
+  nothing. See [Waiting vs stalled](#waiting-vs-stalled).
 
 **Up top**
 - Account-wide totals for today, rolled up from every transcript touched in the last
@@ -36,6 +39,13 @@ sorted by tokens burned.
   times. See [Plan usage](#plan-usage) for how this works.
 - **Derived weekly budget** — what 100% is *in tokens*, how much is left, your run rate per
   day, and whether you'll run dry before the reset. See [Weekly budget](#weekly-budget).
+
+**Two sections below the tiles**
+- **Tokens spent** — per day for the last 30, and per quota week, from the persistent ledger.
+- **How you use Claude Code** — prompts by local hour and weekday, the tools you reach for
+  most, models and reasoning effort, average prompt length, how often you interrupt a turn,
+  and how many sessions you typically run at once. `node claude-sessions.js --patterns`
+  prints the same thing, `--patterns 30` windows it, and `/patterns` returns JSON.
 
 **Interactions**
 - Click a tile to focus that session's terminal tab.
@@ -71,6 +81,7 @@ Everything lands in `~/.switchboard/` — nothing is written near the repo.
 | `ledger.json` | Cumulative tokens per local calendar day. Values only ratchet up. |
 | `samples.jsonl` | A row every 5 minutes pairing token totals with your plan percentage. ~26 KB/day, trimmed to 120 days. |
 | `quota-cache.json` | The last plan-usage response, so restarts don't re-hit the API. **Contains no credentials** — just the usage payload. |
+| `patterns.json` | Per-day prompt counts by hour and weekday, tool/model/effort tallies, prompt lengths, interruption counts. No prompt text is stored. |
 
 Delete the directory at any time; it rebuilds. You lose the day-by-day history, which cannot
 be reconstructed once transcripts age past the rollup window.
@@ -150,6 +161,21 @@ command to refresh it. This tool does not attempt to refresh tokens itself.
 If you'd rather not grant Keychain access, deny it. Everything except the plan-usage bars
 works without it.
 
+## Waiting vs stalled
+
+Claude Code fires *"Claude is waiting for your input"* not when a session goes idle, but once
+it has been quiet for `messageIdleNotifThresholdMs` — default **60 seconds**, and read from
+your `~/.claude/settings.json` if you have set it. The `waiting` bubble uses the same
+threshold, so it appears exactly when the notification does. Under an hour it pulses gently,
+to separate the session that just pinged you from the eleven idle since last night.
+
+`stalled` is a heuristic, not a reported state. A permission prompt happens **mid-turn**, so
+a blocked session still reports `busy`, and Claude Code writes no blocked state anywhere on
+disk — a pending `tool_use` is not flushed to the transcript until it resolves. What is
+observable is a session that is busy while writing nothing and burning no tokens. That is
+almost always a permission prompt, but it cannot be distinguished from a hang or a genuinely
+slow tool, so the badge says `stalled` rather than claiming to know which.
+
 ## Security
 
 **This dashboard exposes the text of your prompts.** Tiles show the last user message and
@@ -213,6 +239,7 @@ anything that acts".
 | `GET /` | The dashboard. |
 | `GET /api` | Everything the page polls, every 2s. |
 | `GET /log` | Daily and weekly usage tables plus the derived budget. |
+| `GET /patterns` | How you use Claude Code — hours, weekdays, tools, models, prompt stats. |
 | `POST /focus?pid=` | Raise that session's terminal tab. |
 | `POST /send?pid=&cmd=` | Run an allowlisted slash command. |
 | `POST /kill?pid=` | SIGTERM that session. |

@@ -12,6 +12,7 @@
   "scripts": {
     "start": "node claude-sessions.js",
     "report": "node claude-sessions.js --report",
+    "patterns": "node claude-sessions.js --patterns",
     "test": "node claude-sessions.js --selftest"
   },
   "engines": { "node": ">=18" },
