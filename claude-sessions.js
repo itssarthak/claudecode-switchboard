@@ -37,7 +37,7 @@ const blank = () => ({
   off: 0, buf: '', ids: new Set(), recent: [],
   tok: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, thinking: 0 },
   msgs: 0, turns: 0, tools: 0, byTool: {}, sidechain: 0, ctx: 0, daily: {},
-  model: null, effort: null, branch: null, lastAt: 0,
+  model: null, effort: null, branch: null, lastAt: 0, modelAt: 0,
   summary: null, lastUser: null, lastAssistant: null, lastTool: null, lastToolAt: 0,
   inbox: [], outbox: [], pat: {}, outbox: [],
 });
@@ -139,7 +139,8 @@ function ingest(st, e) {
   if (!u || st.ids.has(e.message.id)) return;                        // <-- the dedup
   st.ids.add(e.message.id);
   st.msgs++;
-  if (e.message.model) st.model = e.message.model;
+  // model/effort are only on assistant replies, so stamp when they were last true
+  if (e.message.model) { st.model = e.message.model; st.modelAt = ts || st.modelAt }
   if (ts) { const d = patDay(st, ts); bump(d.model, e.message.model); bump(d.effort, st.effort) }
   st.tok.input += u.input_tokens || 0;
   st.tok.output += u.output_tokens || 0;
@@ -656,6 +657,23 @@ function idleNotifMs() {
   return idleMs;
 }
 
+// The context window is not recorded per session anywhere: transcripts log the resolved
+// name ("claude-opus-5") with the [1m] suffix stripped, and the registry carries no model
+// at all. The configured default is the only real signal on disk - a session switched with
+// /model since launch is invisible, so the UI treats this as a hint, not a fact.
+let defModel = null, defModelAt = 0;
+function defaultModel() {
+  if (Date.now() - defModelAt < 60e3) return defModel;
+  defModelAt = Date.now(); defModel = null;
+  for (const f of [path.join(HOME, '.claude', 'settings.json'), path.join(HOME, '.claude.json')]) {
+    try {
+      const v = JSON.parse(fs.readFileSync(f, 'utf8')).model;
+      if (typeof v === 'string' && v) { defModel = v; break }
+    } catch {}
+  }
+  return defModel;
+}
+
 // report() re-reads the samples file, so don't rebuild it on every 2s poll
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 function habits(days = 90) {
@@ -735,7 +753,7 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify(report(), null, 1));
   } else if (req.url === '/api') {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-    res.end(JSON.stringify({ sessions: correlate(scan()), rollup, quota: quota(), budget: budget(), idleNotifMs: idleNotifMs(), now: Date.now() }));
+    res.end(JSON.stringify({ sessions: correlate(scan()), rollup, quota: quota(), budget: budget(), idleNotifMs: idleNotifMs(), defaultModel: defaultModel(), now: Date.now() }));
   } else {
     res.writeHead(200, { 'content-type': 'text/html', 'cache-control': 'no-store' });
     fs.createReadStream(path.join(__dirname, 'claude-sessions.html')).pipe(res);

@@ -61,6 +61,8 @@
   .dot { font-size: .62em; line-height: 1; color: var(--c) }
   .busy { --c: #d99a45 } .idle { --c: #4c9a5a } .stale { --c: #8b8b8b } .unknown { --c: #6b8fd4 }
   .sub { font-size: .76rem; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+  .sub .old { opacity: .6; font-style: italic }
+  .q { font-style: normal; opacity: .45; padding-left: .1em }
 
   .ctx { margin: .7rem 0 .55rem }
   .ctx .row { display: flex; justify-content: space-between; font-size: .78rem; margin-bottom: .25rem }
@@ -348,7 +350,19 @@ function renderBudget(b) {
 
 // Matches Claude Code's own idle_prompt notification: quiet for at least the configured
 // threshold (default 60s), not merely idle.
-let IDLE_MS = 60e3;
+let IDLE_MS = 60e3, DEF_MODEL = null;
+
+// Nothing on disk records a session's context window: transcripts log the resolved model
+// name with the [1m] suffix stripped ("claude-opus-5" whether it is 200k or 1M) and the
+// registry carries no model at all. Two things are knowable: more than 200k of context in
+// play can only be a 1M window, and the configured default says what a session started as.
+// A session switched with /model since launch is invisible, so say so rather than guess.
+const family = m => String(m || '').replace(/^claude-/, '').split(/[-[]/)[0];
+const windowOf = u => u && u.ctx > 2e5
+  ? { win: 1e6, why: 'over 200k in play — this can only be a 1M window' }
+  : { win: /\[1m\]$/.test(DEF_MODEL || '') && family(u?.model) === family(DEF_MODEL) ? 1e6 : 2e5,
+      guess: `not recorded per session — assumed from your default model (${DEF_MODEL || 'unset'}). `
+           + 'A /model switch inside the session would not show here.' };
 const waiting = r => r.alive && r.status === 'idle' && r.statusUpdatedAt > 0
                   && Date.now() - r.statusUpdatedAt >= IDLE_MS;
 
@@ -361,7 +375,9 @@ const stalled = r => r.alive && r.status === 'busy' && r.usage?.lastAt
 function tile(r) {
   const state = !r.alive ? 'stale' : (r.status || 'unknown');
   const u = r.usage;
-  const win = u && u.ctx > 2e5 ? 1e6 : 2e5;
+  const { win, why, guess } = windowOf(u);
+  // model and effort only exist on assistant replies, so they are as old as the last one
+  const oldCfg = u?.modelAt && u.lastAt - u.modelAt > 6e4;
   const top = u ? Object.entries(u.byTool).sort((a, b) => b[1] - a[1]).slice(0, 3)
                   .map(([n, c]) => `${n.replace(/^mcp__[^_]+__/, '')} ${c}`).join('  ·  ') : '';
   return `<div class="tile ${state} ${r.alive ? '' : 'dead'}" data-pid="${r.pid}"
@@ -379,11 +395,13 @@ function tile(r) {
       u?.lastAt ? ` · active ${ago(u.lastAt)} ago` : ''}</div>
     <div class=sub>${esc((u?.model || r.version || '').replace('claude-', ''))}${
       u?.effort ? ` · ${esc(u.effort)}` : ''}${
+      oldCfg ? ` <span class=old title="from the last assistant reply — there has been newer activity since, so a change you just made will not show until this session next replies">as of ${ago(u.modelAt)} ago</span>` : ''}${
       u?.branch && u.branch !== 'HEAD' ? ` · ⑂ ${esc(u.branch)}` : ''}</div>
     ${what(u, state)}
     ${u ? `
     <div class=ctx>
-      <div class=row><span>context</span><b>${k(u.ctx)} / ${win === 1e6 ? '1M' : '200k'}</b></div>
+      <div class=row><span>context</span><b title="${esc(why || guess)}">${k(u.ctx)} / ${
+        win === 1e6 ? '1M' : '200k'}${guess ? '<i class=q>?</i>' : ''}</b></div>
       <div class=ctxbar><i style="width:${Math.min(100, u.ctx / win * 100)}%"></i></div>
     </div>
     <dl>
@@ -505,8 +523,9 @@ renderSpend();
 setInterval(renderSpend, 60e3);
 
 async function tick() {
-  const { sessions, rollup, quota, budget, idleNotifMs } = await (await fetch('/api')).json();
+  const { sessions, rollup, quota, budget, idleNotifMs, defaultModel } = await (await fetch('/api')).json();
   if (idleNotifMs > 0) IDLE_MS = idleNotifMs;
+  DEF_MODEL = defaultModel || null;
   renderQuota(quota);
   renderBudget(budget);
   const d0 = new Date(), today = rollup.days[new Date(d0 - d0.getTimezoneOffset() * 6e4).toISOString().slice(0, 10)] || {};

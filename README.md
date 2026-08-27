@@ -24,10 +24,13 @@ sorted by tokens burned.
   on busy↔idle transitions and never at all by SDK sessions.
 - What it's doing — the last real user prompt, the last assistant reply, and for busy
   sessions the tool call in flight (`⚙ Bash · 2s ago`).
-- Context in play, as a bar against the 200k or 1M window.
+- Context in play, as a bar against the 200k or 1M window. A trailing `?` means the
+  window is assumed rather than known — see [Which window](#which-window).
 - Tokens: 5-minute burn rate and lifetime total, with output / input / cache read /
   cache write / thinking, turn counts and top tools behind a `▸ breakdown` toggle.
-- Model, reasoning effort, and git branch.
+- Model, reasoning effort, and git branch. Those first two come from the last assistant
+  reply, so a session that has newer input but has not replied yet is tagged `as of 3h ago`
+  — a `/model` change you just made will not show until it next replies.
 - A **`waiting 5m`** bubble once a session has been quiet long enough that Claude Code has
   notified you, or a red **`stalled 5m`** when it is busy while writing nothing and burning
   nothing. See [Waiting vs stalled](#waiting-vs-stalled).
@@ -160,6 +163,16 @@ command to refresh it. This tool does not attempt to refresh tokens itself.
 
 If you'd rather not grant Keychain access, deny it. Everything except the plan-usage bars
 works without it.
+
+## Which window
+
+Nothing on disk records a session's context window. Transcripts log the resolved model name
+with the `[1m]` suffix stripped — `claude-opus-5` whether it is the 200k or the 1M variant —
+and `~/.claude/sessions/*.json` carries no model at all. Two things are knowable:
+
+- more than 200k of context in play **can only be** a 1M window, so that case is shown plainly;
+- otherwise the `model` in your settings says what sessions start as, and that is shown with a
+  `?`. A `/model` switch made inside a running session is invisible.
 
 ## Waiting vs stalled
 
