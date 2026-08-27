@@ -17,7 +17,7 @@ Or install it as a Claude Code plugin and run `/switchboard` from inside any ses
 
 ```
 /plugin marketplace add itssarthak/claudecode-switchboard
-/plugin install switchboard@itssarthak
+/plugin install switchboard
 ```
 
 `/switchboard` starts the server and opens the page, `/switchboard report` prints the weekly

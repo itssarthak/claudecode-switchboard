@@ -1,6 +1,6 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "itssarthak",
+  "name": "switchboard",
   "owner": {
     "name": "Sarthak Chhabra",
     "url": "https://github.com/itssarthak"
@@ -13,5 +13,5 @@
       "category": "productivity"
     }
   ],
-  "description": "Small local tools for Claude Code by Sarthak Chhabra."
+  "description": "Switchboard — a local dashboard for every Claude Code session on your Mac."
 }
