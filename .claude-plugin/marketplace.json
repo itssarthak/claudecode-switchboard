@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "itssarthak",
+  "owner": {
+    "name": "Sarthak Chhabra",
+    "url": "https://github.com/itssarthak"
+  },
+  "plugins": [
+    {
+      "name": "switchboard",
+      "source": "./",
+      "description": "Local dashboard for every Claude Code session on your Mac — status, live token burn, plan usage, and messages flying between sessions.",
+      "category": "productivity"
+    }
+  ],
+  "description": "Small local tools for Claude Code by Sarthak Chhabra."
+}

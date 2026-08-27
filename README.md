@@ -13,6 +13,17 @@ node claude-sessions.js
 # http://localhost:7823
 ```
 
+Or install it as a Claude Code plugin and run `/switchboard` from inside any session:
+
+```
+/plugin marketplace add itssarthak/claudecode-switchboard
+/plugin install switchboard@itssarthak
+```
+
+`/switchboard` starts the server and opens the page, `/switchboard report` prints the weekly
+budget, `/switchboard patterns` prints your usage patterns. One server serves every session —
+running the command again in a second session just reopens the same page.
+
 ## What it shows
 
 Sessions are read from `~/.claude/sessions/*.json` and grouped by working directory,
