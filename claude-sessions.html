@@ -351,6 +351,9 @@ function renderBudget(b) {
 // Matches Claude Code's own idle_prompt notification: quiet for at least the configured
 // threshold (default 60s), not merely idle.
 let IDLE_MS = 60e3, DEF_MODEL = null;
+// tick() rebuilds every tile every 2s, so an 'armed' class on the button is wiped
+// mid-decision - the second click then re-arms instead of sending. Keep it out here.
+let armed = null, armTimer = 0;
 
 // Nothing on disk records a session's context window: transcripts log the resolved model
 // name with the [1m] suffix stripped ("claude-opus-5" whether it is 200k or 1M) and the
@@ -389,7 +392,8 @@ function tile(r) {
       : waiting(r) ? `<span class="wait ${Date.now() - r.statusUpdatedAt < 36e5 ? 'fresh' : ''}"
                     title="quiet for ${ago(r.statusUpdatedAt)} — Claude Code has notified you it is waiting for input"
                     >waiting ${ago(r.statusUpdatedAt)}</span>` : ''}${
-      r.alive ? `<button class=cmd data-cmd=compact>compact</button>
+      r.alive ? `<button class="cmd ${armed === r.pid + ':compact' ? 'armed' : ''}" data-cmd=compact>${
+                   armed === r.pid + ':compact' ? '/compact?' : 'compact'}</button>
                  <button class=kill title="send SIGTERM to pid ${r.pid}">kill</button>` : ''}</div>
     <div class=sub>${state} · pid ${r.pid}${r.startedAt ? ` · up ${ago(r.startedAt)}` : ''}${
       u?.lastAt ? ` · active ${ago(u.lastAt)} ago` : ''}</div>
@@ -578,12 +582,14 @@ document.addEventListener('click', async e => {
   const btn = e.target.closest('.cmd');
   if (btn) {
     e.stopPropagation();
-    const pid = btn.closest('.tile').dataset.pid, cmd = btn.dataset.cmd;
-    if (!btn.classList.contains('armed')) {          // two-step: arm, then send
-      btn.classList.add('armed'); btn.textContent = `/${cmd}?`;
-      return setTimeout(() => { btn.classList.remove('armed'); btn.textContent = cmd }, 3000);
+    const pid = +btn.closest('.tile').dataset.pid, cmd = btn.dataset.cmd, key = pid + ':' + cmd;
+    clearTimeout(armTimer);
+    if (armed !== key) {                             // two-step: arm, then send
+      armed = key; btn.classList.add('armed'); btn.textContent = `/${cmd}?`;
+      armTimer = setTimeout(() => { armed = null }, 6000);   // next tick repaints the label
+      return toast(`click again within 6s to send /${cmd}`);
     }
-    btn.classList.remove('armed'); btn.textContent = cmd;
+    armed = null; btn.classList.remove('armed'); btn.textContent = cmd;
     const r = await (await fetch(`/send?pid=${pid}&cmd=${cmd}`, { method: 'POST' })).json();
     return toast(r.ok ? `/${cmd} sent to ${r.app}${r.queued ? ' (queued - session is mid-turn)' : ''}`
                       : `couldn't send: ${r.error}`);

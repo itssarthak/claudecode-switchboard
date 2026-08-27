@@ -63,7 +63,7 @@ sorted by tokens burned.
 
 **Interactions**
 - Click a tile to focus that session's terminal tab.
-- Hover a tile for a `compact` button — click once to arm, again to send `/compact`.
+- Hover a tile for a `compact` button — click once to arm, again within 6s to send `/compact`.
 - Hover for a `kill` button — sends SIGTERM after a confirmation prompt.
 - When one session messages another, an envelope flies between the two tiles and opens into
   the message summary — the one the sending agent wrote in its own `SendMessage` call, not a
