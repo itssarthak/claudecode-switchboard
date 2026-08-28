@@ -78,11 +78,13 @@
   .tools { font-size: .73rem; color: var(--dim); margin-top: .3rem;
            white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
 
-  #quota { display: flex; flex-wrap: wrap; gap: 1.4rem; margin: .2rem 0 1rem }
+  #quota { display: flex; flex-wrap: wrap; gap: .9rem 2.2rem;
+           border: 1px solid var(--line); border-radius: .5rem; padding: .55rem .85rem;
+           margin: .1rem 0 .5rem }
   .q { min-width: 13rem; flex: 1 1 13rem; max-width: 22rem }
   .q .qh { display: flex; justify-content: space-between; font-size: .82rem; margin-bottom: .25rem }
   .q .qh b { font-variant-numeric: tabular-nums }
-  .q .qh span { color: var(--dim) }
+  .q .qh span { color: var(--fg) }
   .q .track { height: .5rem; border-radius: .25rem; background: var(--line) }
   .q .fill { height: 100%; border-radius: .25rem; background: var(--qc) }
   .q .rst { font-size: .74rem; color: var(--dim); margin-top: .25rem }
