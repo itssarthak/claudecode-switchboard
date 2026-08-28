@@ -1,6 +1,6 @@
 {
   "name": "switchboard",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Local dashboard for every Claude Code session on your Mac — status, live token burn, plan usage, and messages flying between sessions.",
   "author": {
     "name": "Sarthak Chhabra",

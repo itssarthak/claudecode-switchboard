@@ -62,7 +62,7 @@
   .busy { --c: #d99a45 } .idle { --c: #4c9a5a } .stale { --c: #8b8b8b } .unknown { --c: #6b8fd4 }
   .sub { font-size: .76rem; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
   .sub .old { opacity: .6; font-style: italic }
-  .q { font-style: normal; opacity: .45; padding-left: .1em }
+  .guess { font-style: normal; opacity: .45; padding-left: .1em }
 
   .ctx { margin: .7rem 0 .55rem }
   .ctx .row { display: flex; justify-content: space-between; font-size: .78rem; margin-bottom: .25rem }
@@ -78,27 +78,25 @@
   .tools { font-size: .73rem; color: var(--dim); margin-top: .3rem;
            white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
 
-  #quota { display: flex; flex-wrap: wrap; gap: .9rem 2.2rem;
-           border: 1px solid var(--line); border-radius: .5rem; padding: .55rem .85rem;
-           margin: .1rem 0 .5rem }
-  .q { min-width: 13rem; flex: 1 1 13rem; max-width: 22rem }
-  .q .qh { display: flex; justify-content: space-between; font-size: .82rem; margin-bottom: .25rem }
-  .q .qh b { font-variant-numeric: tabular-nums }
-  .q .qh span { color: var(--fg) }
-  .q .track { height: .5rem; border-radius: .25rem; background: var(--line) }
-  .q .fill { height: 100%; border-radius: .25rem; background: var(--qc) }
-  .q .rst { font-size: .74rem; color: var(--dim); margin-top: .25rem }
-  /* Cards read dim-label + full-strength value (dl dt / dd). This block used to be dim
-     label + GREEN value, so it was the one region with no bright anchor and read as
-     washed out next to them. Match the cards; keep the colour on the bar, and on the
-     number only once it is worth alarming about. */
-  .q .qh b { color: var(--fg) }
-  .q.warn .qh b, .q.hot .qh b { color: var(--qc) }
-  .q.normal { --qc: #4c9a5a } .q.warn { --qc: #d99a45 } .q.hot { --qc: #c9584f }
-  .q.err { color: var(--dim); font-size: .82rem }
+  /* every rule here stays scoped to #quota - a bare .q once collided with the window
+     marker and the card prompt line, and silently dimmed this whole section to 45% */
+  #quota { display: flex; flex-wrap: wrap; gap: 1.4rem; margin: .2rem 0 1rem }
+  #quota .q { min-width: 13rem; flex: 1 1 13rem; max-width: 22rem }
+  #quota .qh { display: flex; justify-content: space-between; font-size: .82rem; margin-bottom: .25rem }
+  #quota .qh b { font-variant-numeric: tabular-nums }
+  /* Text stays neutral like the cards. The status colour lives on the bar (and --qc), so
+     it never becomes currentColor here - --dim is currentColor at 55%, so tinting the
+     block would tint its own labels. */
+  #quota .qh span, #quota .qh b { color: var(--fg) }
+  #quota .track { height: .5rem; border-radius: .25rem; background: var(--line) }
+  #quota .fill { height: 100%; border-radius: .25rem; background: var(--qc) }
+  #quota .rst { font-size: .74rem; color: var(--dim); margin-top: .25rem }
+  #quota .normal { --qc: #4c9a5a } #quota .warn { --qc: #d99a45 } #quota .hot { --qc: #c9584f }
+  #quota .warn .qh b, #quota .hot .qh b { color: var(--qc) }   /* colour back on the number when it matters */
+  #quota .err { color: var(--dim); font-size: .82rem }
 
   .what { margin: .5rem 0 .1rem; font-size: .82rem; line-height: 1.45 }
-  .what .q { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  .what .ask { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
              overflow: hidden; color: var(--fg) }
   .what .a { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
              overflow: hidden; color: var(--dim); margin-top: .3rem }
@@ -222,7 +220,7 @@ function what(u, state) {
   if (!u) return '';
   const head = u.summary || u.lastUser;
   return `<div class=what>${
-    head ? `<div class=q><span class=lead>${u.summary ? 'topic' : 'asked'}</span> ${esc(head)}</div>` : ''}${
+    head ? `<div class=ask><span class=lead>${u.summary ? 'topic' : 'asked'}</span> ${esc(head)}</div>` : ''}${
     u.lastAssistant ? `<div class=a>${esc(u.lastAssistant)}</div>` : ''}${
     state === 'busy' && u.lastTool
       ? `<div class=doing>⚙ ${esc(u.lastTool.replace(/^mcp__[^_]+__/, ''))} · ${ago(u.lastToolAt)} ago</div>` : ''}
@@ -413,7 +411,7 @@ function tile(r) {
     ${u ? `
     <div class=ctx>
       <div class=row><span>context</span><b title="${esc(why || guess)}">${k(u.ctx)} / ${
-        win === 1e6 ? '1M' : '200k'}${guess ? '<i class=q>?</i>' : ''}</b></div>
+        win === 1e6 ? '1M' : '200k'}${guess ? '<i class=guess>?</i>' : ''}</b></div>
       <div class=ctxbar><i style="width:${Math.min(100, u.ctx / win * 100)}%"></i></div>
     </div>
     <dl>
