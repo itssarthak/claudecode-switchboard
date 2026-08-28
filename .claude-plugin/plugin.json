@@ -1,10 +1,20 @@
 {
   "name": "switchboard",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local dashboard for every Claude Code session on your Mac — status, live token burn, plan usage, and messages flying between sessions.",
-  "author": { "name": "Sarthak Chhabra", "url": "https://github.com/itssarthak" },
+  "author": {
+    "name": "Sarthak Chhabra",
+    "url": "https://github.com/itssarthak"
+  },
   "homepage": "https://github.com/itssarthak/claudecode-switchboard",
   "repository": "https://github.com/itssarthak/claudecode-switchboard",
   "license": "MIT",
-  "keywords": ["claude-code", "dashboard", "tokens", "usage", "sessions", "macos"]
+  "keywords": [
+    "claude-code",
+    "dashboard",
+    "tokens",
+    "usage",
+    "sessions",
+    "macos"
+  ]
 }
