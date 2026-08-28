@@ -2,7 +2,7 @@
 <style>
   :root { color-scheme: light dark; --line: color-mix(in srgb, currentColor 16%, transparent);
           --dim: color-mix(in srgb, currentColor 55%, transparent);
-          --bg: Canvas }   /* the browser paints the canvas behind the page, not on it, so a
+          --bg: Canvas; --fg: CanvasText }   /* the browser paints the canvas behind the page, not on it, so a
                               sticky element inherits nothing - name it to reuse it */
   * { box-sizing: border-box }
   body { background: var(--bg);
@@ -83,10 +83,13 @@
   .q .qh { display: flex; justify-content: space-between; font-size: .82rem; margin-bottom: .25rem }
   .q .qh b { font-variant-numeric: tabular-nums }
   .q .qh span { color: var(--dim) }
-  .q .track { height: .5rem; border-radius: .25rem; background: color-mix(in srgb, currentColor 15%, transparent) }
-  .q .fill { height: 100%; border-radius: .25rem; background: currentColor }
+  .q .track { height: .5rem; border-radius: .25rem; background: var(--line) }
+  .q .fill { height: 100%; border-radius: .25rem; background: var(--qc) }
   .q .rst { font-size: .74rem; color: var(--dim); margin-top: .25rem }
-  .q.normal { color: #4c9a5a } .q.warn { color: #d99a45 } .q.hot { color: #c9584f }
+  /* tint only the number and the bar - putting the status colour on .q itself dragged
+     currentColor with it, and --dim (currentColor at 55%) turned the labels murky green */
+  .q .qh b { color: var(--qc) }
+  .q.normal { --qc: #4c9a5a } .q.warn { --qc: #d99a45 } .q.hot { --qc: #c9584f }
   .q.err { color: var(--dim); font-size: .82rem }
 
   .what { margin: .5rem 0 .1rem; font-size: .82rem; line-height: 1.45 }
