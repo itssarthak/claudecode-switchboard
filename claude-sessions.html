@@ -53,10 +53,14 @@
   .wait.fresh { animation: breathe 2.2s ease-in-out infinite }
   @keyframes breathe { 50% { opacity: .45 } }
   @media (prefers-reduced-motion: reduce) { .wait.fresh { animation: none } }
-  .cmd { margin-left: auto; flex: none; font: inherit; font-size: .68rem; cursor: pointer;
+  .cmd { flex: none; font: inherit; font-size: .68rem; cursor: pointer;
          border: 1px solid var(--line); border-radius: .3rem; padding: .05rem .4rem;
          background: transparent; color: var(--dim); opacity: 0; transition: opacity .15s }
   .tile:hover .cmd, .cmd.armed { opacity: 1 }
+  .say { margin-left: auto; flex: none; font: inherit; font-size: .68rem; cursor: pointer;
+         border: 1px solid var(--line); border-radius: .25rem; padding: .05rem .4rem;
+         background: transparent; color: var(--dim); opacity: 0; transition: opacity .15s }
+  .tile:hover .say { opacity: 1 }
   .cmd.armed { color: var(--c); border-color: var(--c) }
   .dot { font-size: .62em; line-height: 1; color: var(--c) }
   .busy { --c: #d99a45 } .idle { --c: #4c9a5a } .stale { --c: #8b8b8b } .unknown { --c: #6b8fd4 }
@@ -179,6 +183,20 @@
   .chip { font-size: .73rem; border: 1px solid var(--line); border-radius: 999px; padding: .1rem .55rem }
   .chip b { font-variant-numeric: tabular-nums }
 
+  /* Lives outside #groups on purpose: tick() rebuilds every tile every 2s, which would
+     eat the draft and the caret. Same lesson the compact arm taught. */
+  #say { position: fixed; left: 50%; bottom: 1.2rem; transform: translateX(-50%); z-index: 60;
+         width: min(46rem, calc(100vw - 3rem)); display: none;
+         border: 1px solid var(--line); border-radius: .6rem; padding: .55rem .7rem;
+         background: var(--bg); box-shadow: 0 8px 28px -10px rgba(0,0,0,.6) }
+  #say.on { display: block }
+  #say .to { font-size: .76rem; color: var(--dim); margin-bottom: .35rem;
+             display: flex; justify-content: space-between; gap: 1rem }
+  #say .to b { color: var(--fg); font-weight: 600 }
+  #say textarea { width: 100%; resize: vertical; min-height: 3.4rem; font: inherit; font-size: .84rem;
+                  color: var(--fg); background: transparent; border: 1px solid var(--line);
+                  border-radius: .4rem; padding: .4rem .5rem }
+  #say textarea:focus { outline: none; border-color: color-mix(in srgb, currentColor 40%, transparent) }
   #toast { position: fixed; bottom: 1.4rem; left: 50%; transform: translateX(-50%);
            background: #1c1c1c; color: #f0f0f0; padding: .6rem 1rem; border-radius: .5rem;
            font-size: .82rem; opacity: 0; transition: opacity .2s; pointer-events: none }
@@ -194,6 +212,10 @@
 <div id=groups></div>
 <details id=spend open><summary>Tokens spent <small></small></summary><div class=hgrid></div></details>
 <details id=habits open><summary>How you use Claude Code <small></small></summary><div class=hgrid></div></details>
+<div id=say>
+  <div class=to><span>message <b id=sayto></b></span><span>enter to send · esc to close</span></div>
+  <textarea id=saytext rows=2 maxlength=2000 placeholder="type a message…"></textarea>
+</div>
 <div id=toast></div>
 <script>
 const STATES = {
@@ -360,6 +382,7 @@ let IDLE_MS = 60e3, DEF_MODEL = null;
 // tick() rebuilds every tile every 2s, so an 'armed' class on the button is wiped
 // mid-decision - the second click then re-arms instead of sending. Keep it out here.
 let armed = null, armTimer = 0;
+let sayPid = null;                       // which session the composer is aimed at
 
 // Nothing on disk records a session's context window: transcripts log the resolved model
 // name with the [1m] suffix stripped ("claude-opus-5" whether it is 200k or 1M) and the
@@ -398,7 +421,8 @@ function tile(r) {
       : waiting(r) ? `<span class="wait ${Date.now() - r.statusUpdatedAt < 36e5 ? 'fresh' : ''}"
                     title="quiet for ${ago(r.statusUpdatedAt)} — Claude Code has notified you it is waiting for input"
                     >waiting ${ago(r.statusUpdatedAt)}</span>` : ''}${
-      r.alive ? `<button class="cmd ${armed === r.pid + ':compact' ? 'armed' : ''}" data-cmd=compact>${
+      r.alive ? `<button class=say title="type a message into this session's prompt">say</button>
+                 <button class="cmd ${armed === r.pid + ':compact' ? 'armed' : ''}" data-cmd=compact>${
                    armed === r.pid + ':compact' ? '/compact?' : 'compact'}</button>
                  <button class=kill title="send SIGTERM to pid ${r.pid}">kill</button>` : ''}</div>
     <div class=sub>${state} · pid ${r.pid}${r.startedAt ? ` · up ${ago(r.startedAt)}` : ''}${
@@ -574,7 +598,36 @@ async function tick() {
 const toast = m => { const t = document.getElementById('toast');
   t.textContent = m; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2600) };
 
+const sayBox = () => document.getElementById('say');
+function openSay(pid, name) {
+  sayPid = pid;
+  document.getElementById('sayto').textContent = name;
+  sayBox().classList.add('on');
+  const t = document.getElementById('saytext');
+  t.focus(); t.setSelectionRange(t.value.length, t.value.length);
+}
+function closeSay() { sayPid = null; sayBox().classList.remove('on') }
+
+document.getElementById('saytext').addEventListener('keydown', async e => {
+  if (e.key === 'Escape') return closeSay();
+  if (e.key !== 'Enter' || e.shiftKey) return;      // shift+enter for a newline while drafting
+  e.preventDefault();
+  const t = e.target, text = t.value.trim(), pid = sayPid;
+  if (!text || pid == null) return;
+  t.value = ''; closeSay();
+  const r = await (await fetch('/say?pid=' + pid, { method: 'POST', body: text })).json();
+  toast(r.ok ? `sent to ${r.app}${r.queued ? ' (queued - session is mid-turn)' : ''}`
+             : `couldn't send: ${r.error}`);
+  if (!r.ok) { t.value = text; openSay(pid, document.getElementById('sayto').textContent) }
+});
+
 document.addEventListener('click', async e => {
+  const sb = e.target.closest('.say');
+  if (sb) {
+    e.stopPropagation();
+    const tile = sb.closest('.tile');
+    return openSay(+tile.dataset.pid, tile.querySelector('.name .txt')?.textContent || tile.dataset.pid);
+  }
   const kb = e.target.closest('.kill');
   if (kb) {
     e.stopPropagation();

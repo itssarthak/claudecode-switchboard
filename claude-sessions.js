@@ -206,6 +206,19 @@ const scan = () => !fs.existsSync(SESSIONS) ? [] : fs.readdirSync(SESSIONS).filt
 }).filter(Boolean).sort((a, b) => (b.alive - a.alive) || (b.startedAt - a.startedAt));
 
 // --- self-check: incremental parse must equal a one-shot parse, and repeat polls must not drift
+// The text lands inside an AppleScript string literal, so only \ and " can break out of it.
+// Control characters are stripped rather than escaped: a newline would submit the line early
+// and type the remainder as a second prompt, and ESC sequences would drive the TUI.
+const CTRL = /[\u0000-\u001f\u007f-\u009f]/g;
+const SAY_MAX = 2000;
+function cleanSay(raw) {
+  const t = String(raw ?? '').replace(CTRL, ' ').replace(/\s+/g, ' ').trim();
+  if (!t) return { error: 'empty message' };
+  if (t.length > SAY_MAX) return { error: `too long: ${t.length} chars, max ${SAY_MAX}` };
+  return { text: t };
+}
+const osaLit = t => t.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+
 if (process.argv[2] === '--patterns') {
   setTimeout(() => {
     const h = habits(Number(process.argv[3]) || 90);
@@ -270,6 +283,15 @@ if (process.argv[2] === '--patterns') {
   for (const l of fs.readFileSync(file, 'utf8').split('\n')) if (l) try { ingest(oneShot, JSON.parse(l)) } catch {}
   assert.deepStrictEqual(inc.tok, oneShot.tok, 'incremental != one-shot');
   assert.ok(inc.msgs < oneShot.ids.size + 1 && inc.msgs > 0);
+  // /say hands text to an AppleScript string literal - these are the only two ways out of it
+  assert.strictEqual(osaLit('say "hi"'), 'say \\"hi\\"');
+  assert.strictEqual(osaLit('back\\slash'), 'back\\\\slash');
+  assert.strictEqual(osaLit('a"; do shell script "rm -rf /'), 'a\\"; do shell script \\"rm -rf /');
+  assert.strictEqual(cleanSay('one\ntwo').text, 'one two');            // newline would submit early
+  assert.strictEqual(cleanSay('esc\u001b[31m').text, 'esc [31m');      // ESC would drive the TUI
+  assert.strictEqual(cleanSay('   ').error, 'empty message');
+  assert.ok(cleanSay('x'.repeat(SAY_MAX + 1)).error.startsWith('too long'));
+  assert.strictEqual(cleanSay('x'.repeat(SAY_MAX)).text.length, SAY_MAX);
   console.log('selftest OK', path.basename(file), inc.tok, `msgs=${inc.msgs}`);
   process.exit(0);
 }
@@ -352,12 +374,12 @@ function focus(pid) {
 // this endpoint, so it is NOT a general "type into any terminal" hole: allowlist only.
 const ALLOWED = new Set(['compact', 'context', 'cost', 'status']);
 const TYPE = {
-  'Terminal': (tty, cmd) => `tell application "Terminal"
+  'Terminal': (tty, line) => `tell application "Terminal"
       repeat with wi from 1 to count of windows
         try
           repeat with ti from 1 to count of tabs of window wi
             if tty of tab ti of window wi is "${tty}" then
-              do script "/${cmd}" in tab ti of window wi
+              do script "${line}" in tab ti of window wi
               return "ok"
             end if
           end repeat
@@ -365,13 +387,13 @@ const TYPE = {
       end repeat
     end tell
     return "no-tab"`,
-  'iTerm2': (tty, cmd) => `tell application "iTerm2"
+  'iTerm2': (tty, line) => `tell application "iTerm2"
       repeat with wi from 1 to count of windows
         try
           repeat with ti from 1 to count of tabs of window wi
             repeat with si from 1 to count of sessions of tab ti of window wi
               if tty of session si of tab ti of window wi is "${tty}" then
-                tell session si of tab ti of window wi to write text "/${cmd}"
+                tell session si of tab ti of window wi to write text "${line}"
                 return "ok"
               end if
             end repeat
@@ -382,8 +404,7 @@ const TYPE = {
     return "no-tab"`,
 };
 
-function send(pid, cmd) {
-  if (!ALLOWED.has(cmd)) return { ok: false, error: `'${cmd}' not allowed` };
+function type(pid, line) {
   const live = scan().find(s => s.pid === pid);
   if (!live) return { ok: false, error: 'no such session' };
   if (!live.alive) return { ok: false, error: 'session is dead' };
@@ -392,11 +413,22 @@ function send(pid, cmd) {
   const app = hostApp(pid);
   if (!TYPE[app]) return { ok: false, app, error: `${app || 'this terminal'} can't be typed into - editor terminals aren't scriptable` };
   try {
-    const r = execFileSync('osascript', ['-e', TYPE[app](`/dev/${tty}`, cmd)], { timeout: 5000 }).toString().trim();
+    const r = execFileSync('osascript', ['-e', TYPE[app](`/dev/${tty}`, osaLit(line))], { timeout: 5000 }).toString().trim();
     return r === 'ok'
       ? { ok: true, app, tty, queued: live.status === 'busy' }   // busy sessions queue the input
       : { ok: false, app, tty, error: 'tab not found' };
   } catch (e) { return { ok: false, app, tty, error: String(e.stderr || e.message).slice(0, 200) } }
+}
+
+function send(pid, cmd) {
+  if (!ALLOWED.has(cmd)) return { ok: false, error: `'${cmd}' not allowed` };
+  return type(pid, `/${cmd}`);
+}
+
+function say(pid, raw) {
+  const { text, error } = cleanSay(raw);
+  if (error) return { ok: false, error };
+  return { ...type(pid, text), text };
 }
 
 
@@ -728,17 +760,34 @@ const sameOrigin = req => {
   const o = req.headers.origin;
   return !o || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(o);
 };
+// the prompt text rides in the body, not the query string, so it stays out of any log
+const body = (req, cap = 8192) => new Promise((ok, no) => {
+  let b = '';
+  req.on('data', c => { b += c; if (b.length > cap) { no(new Error('body too large')); req.destroy() } });
+  req.on('end', () => ok(b));
+  req.on('error', no);
+});
+
 const server = http.createServer((req, res) => {
   const sendCmd = req.url.match(/^\/send\?pid=(\d+)&cmd=(\w+)$/);
+  const sayPid = req.url.match(/^\/say\?pid=(\d+)$/);
   const focusPid = req.url.match(/^\/focus\?pid=(\d+)$/);
   const killPid = req.url.match(/^\/kill\?pid=(\d+)$/);
-  if ((sendCmd || focusPid || killPid) && !(sameOrigin(req) && req.method === 'POST')) {
+  if ((sendCmd || sayPid || focusPid || killPid) && !(sameOrigin(req) && req.method === 'POST')) {
     res.writeHead(403, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     return res.end(JSON.stringify({ ok: false, error: 'cross-origin or non-POST request refused' }));
   }
   if (sendCmd) {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify(send(Number(sendCmd[1]), sendCmd[2])));
+  } else if (sayPid) {
+    body(req).then(
+      t => say(Number(sayPid[1]), t),
+      e => ({ ok: false, error: String(e.message || e) }),
+    ).then(r => {
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      res.end(JSON.stringify(r));
+    });
   } else if (focusPid) {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify(focus(Number(focusPid[1]))));

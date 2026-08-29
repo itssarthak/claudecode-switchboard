@@ -63,6 +63,9 @@ sorted by tokens burned.
 
 **Interactions**
 - Click a tile to focus that session's terminal tab.
+- Hover a tile for a **`say`** button to message that session — type, Enter to send, Esc to
+  close, shift+Enter for a newline while drafting. The composer sits outside the tiles, so
+  the 2s refresh can't eat your draft. See [Messaging a session](#messaging-a-session).
 - Hover a tile for a `compact` button — click once to arm, again within 6s to send `/compact`.
 - Hover for a `kill` button — sends SIGTERM after a confirmation prompt.
 - When one session messages another, an envelope flies between the two tiles and opens into
@@ -185,6 +188,26 @@ and `~/.claude/sessions/*.json` carries no model at all. Two things are knowable
 - otherwise the `model` in your settings says what sessions start as, and that is shown with a
   `?`. A `/model` switch made inside a running session is invisible.
 
+## Messaging a session
+
+`say` types your text into that session's prompt and presses Enter, over the same AppleScript
+path as `/compact`. It is the real prompt, so the session answers exactly as if you had typed
+it in the terminal — and it queues if the session is mid-turn.
+
+This is genuinely "type into my terminal over HTTP", which is why it is a separate endpoint
+from `/send` and why the server binds to loopback only. What guards it:
+
+- POST and same-origin only, like every other acting endpoint.
+- The pid must be live and in the session registry, so a dead tab sitting at a shell prompt
+  can't be typed into.
+- Control characters are stripped, not escaped — a newline would submit early and type the
+  rest as a second prompt, and ESC sequences would drive the TUI. 2000 character cap.
+- The text reaches the AppleScript literal with `\` and `"` escaped, the only two ways out of
+  it. `--selftest` asserts this, including an attempted `"; do shell script "…` break-out.
+- The prompt rides in the request body, never the query string, so it stays out of any log.
+
+Cursor and VS Code sessions can't be messaged, for the same reason they can't be focused.
+
 ## Waiting vs stalled
 
 Claude Code fires *"Claude is waiting for your input"* not when a session goes idle, but once
@@ -217,8 +240,12 @@ not just counters. Treat the port like your terminal.
   present in the session registry. It cannot signal arbitrary processes: `pid 1` and
   anything else Claude Code doesn't own is refused. The UI asks for confirmation first.
 - `/send` accepts an **allowlist** — `compact`, `context`, `cost`, `status` — and nothing
-  else. It is not a general "type into my terminal" endpoint. The target pid must be live
-  and present in the session registry, and its tty must match `^ttys?\d+$`.
+  else. The target pid must be live and present in the session registry, and its tty must
+  match `^ttys?\d+$`.
+- `/say` **is** the general "type into my terminal" endpoint, deliberately kept separate so
+  the two can be reasoned about apart. Same pid and tty checks, plus control-character
+  stripping, a length cap, and AppleScript literal escaping. See
+  [Messaging a session](#messaging-a-session).
 - `/api` and `/log` are read-only and send no `Access-Control-Allow-Origin`, so a foreign page
   can issue the request but cannot read the response.
 - Every subprocess call uses `execFileSync` with an argument array. No shell.
@@ -245,8 +272,8 @@ anything that acts".
 - **No cost estimates.** Token counts are volume, not dollars; prices aren't on disk and
   guessing them would be worse than omitting them.
 - AppleScript blocks the event loop for up to 5s on a focus or send.
-- `--selftest` covers token accounting only. The AppleScript and quota paths are verified
-  by hand.
+- `--selftest` covers token accounting and the `/say` sanitiser. The AppleScript and quota
+  paths are verified by hand.
 
 ## Files
 
@@ -266,6 +293,7 @@ anything that acts".
 | `GET /patterns` | How you use Claude Code — hours, weekdays, tools, models, prompt stats. |
 | `POST /focus?pid=` | Raise that session's terminal tab. |
 | `POST /send?pid=&cmd=` | Run an allowlisted slash command. |
+| `POST /say?pid=` | Type the request body into that session's prompt. |
 | `POST /kill?pid=` | SIGTERM that session. |
 
 ## License
