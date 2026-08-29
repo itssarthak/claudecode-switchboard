@@ -39,7 +39,7 @@ const blank = () => ({
   msgs: 0, turns: 0, tools: 0, byTool: {}, sidechain: 0, ctx: 0, daily: {},
   model: null, effort: null, branch: null, lastAt: 0, modelAt: 0,
   summary: null, lastUser: null, lastAssistant: null, lastTool: null, lastToolAt: 0,
-  inbox: [], outbox: [], pat: {}, outbox: [],
+  inbox: [], outbox: [], pat: {}, thread: [],
 });
 
 function usage(file) {
@@ -57,11 +57,12 @@ function usage(file) {
   const now = Date.now();
   st.recent = st.recent.filter(r => now - r.ts < BURN_WINDOW);
   const burn = st.recent.reduce((n, r) => n + r.out, 0);
-  const { off, buf, ids, recent, ...out } = st;
+  const { off, buf, ids, recent, thread, ...out } = st;
   return { ...out, total: Object.values(st.tok).reduce((a, b) => a + b, 0) - st.tok.thinking, burn };
 }
 
 // injected pseudo-user turns: tool results, <system-reminder>, observer/cross-session relays
+const THREAD_TURNS = 24, THREAD_CHARS = 1500;
 const NOISE = /^(<|\[MESSAGE FROM NON-USER|Another Claude session sent|Caveat: The messages below|This session is being continued|Continue from where you left off)/;
 // receiver side of a session->session message: the socket path carries the sender's pid
 const XSESS = /<cross-session-message from="uds:[^"]*?\/(\d+)\.sock"(?:[^>]*?from-name="([^"]*)")?[^>]*>\s*([\s\S]{0,1200})/;
@@ -119,6 +120,17 @@ function ingest(st, e) {
     }
     if (t && e.type === 'user' && !NOISE.test(t)) st.lastUser = t.slice(0, 300);
     if (t && e.type === 'assistant') st.lastAssistant = t.slice(0, 300);
+    // rolling transcript tail for the composer. Streaming rewrites the same assistant
+    // message repeatedly, so match on id and replace rather than append a duplicate.
+    if (t && (e.type === 'assistant' || (e.type === 'user' && !NOISE.test(t)))) {
+      const id = e.message?.id || e.uuid || null;
+      const at = id && st.thread.find(m => m.id === id);
+      if (at) { at.text = t.slice(0, THREAD_CHARS); at.at = ts || at.at }
+      else {
+        st.thread.push({ id, role: e.type, at: ts, text: t.slice(0, THREAD_CHARS) });
+        st.thread.splice(0, st.thread.length - THREAD_TURNS);
+      }
+    }
   }
   // a real user turn: a user message that is prose, not a tool result being fed back
   if (e.type === 'user' && !e.isSidechain &&
@@ -196,6 +208,17 @@ function rollupPass() {
 }
 setTimeout(rollupPass, 200);
 setInterval(rollupPass, 60e3);
+
+// the conversation tail for one session, fetched on demand rather than pushed to every poll
+function threadOf(pid) {
+  const s = scan().find(x => x.pid === pid);
+  if (!s) return { ok: false, error: 'no such session' };
+  const t = transcriptOf(s.sessionId);
+  if (!t) return { ok: false, error: 'no transcript yet' };
+  usage(t);                                              // make sure the tail is current
+  return { ok: true, name: s.name || String(pid), alive: s.alive, status: s.status,
+           messages: parsed.get(t)?.thread || [] };
+}
 
 const scan = () => !fs.existsSync(SESSIONS) ? [] : fs.readdirSync(SESSIONS).filter(f => f.endsWith('.json')).map(f => {
   try {
@@ -771,6 +794,7 @@ const body = (req, cap = 8192) => new Promise((ok, no) => {
 const server = http.createServer((req, res) => {
   const sendCmd = req.url.match(/^\/send\?pid=(\d+)&cmd=(\w+)$/);
   const sayPid = req.url.match(/^\/say\?pid=(\d+)$/);
+  const threadPid = req.url.match(/^\/thread\?pid=(\d+)$/);
   const focusPid = req.url.match(/^\/focus\?pid=(\d+)$/);
   const killPid = req.url.match(/^\/kill\?pid=(\d+)$/);
   if ((sendCmd || sayPid || focusPid || killPid) && !(sameOrigin(req) && req.method === 'POST')) {
@@ -794,6 +818,9 @@ const server = http.createServer((req, res) => {
   } else if (killPid) {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify(killSession(Number(killPid[1]))));
+  } else if (threadPid) {
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+    res.end(JSON.stringify(threadOf(Number(threadPid[1]))));
   } else if (req.url === '/patterns') {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify(habits(), null, 1));

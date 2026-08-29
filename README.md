@@ -63,9 +63,9 @@ sorted by tokens burned.
 
 **Interactions**
 - Click a tile to focus that session's terminal tab.
-- Hover a tile for a **`say`** button to message that session — type, Enter to send, Esc to
-  close, shift+Enter for a newline while drafting. The composer sits outside the tiles, so
-  the 2s refresh can't eat your draft. See [Messaging a session](#messaging-a-session).
+- Hover a tile for a **`say`** button to chat with that session — the composer shows the last
+  24 turns and stays open after you send, so the reply lands in front of you. Enter sends, Esc
+  closes, shift+Enter is a newline. See [Messaging a session](#messaging-a-session).
 - Hover a tile for a `compact` button — click once to arm, again within 6s to send `/compact`.
 - Hover for a `kill` button — sends SIGTERM after a confirmation prompt.
 - When one session messages another, an envelope flies between the two tiles and opens into
@@ -194,6 +194,16 @@ and `~/.claude/sessions/*.json` carries no model at all. Two things are knowable
 path as `/compact`. It is the real prompt, so the session answers exactly as if you had typed
 it in the terminal — and it queues if the session is mid-turn.
 
+The composer shows the **last 24 turns**, refreshed every 2s, and stays open after you send so
+you can watch the reply arrive. It follows the bottom only if you are already there, so
+scrolling back to read doesn't yank you forward. The tail comes from `/thread?pid=` rather than
+riding the 2s poll — 24 turns × 1500 chars across every session would be megabytes a minute.
+Streaming rewrites the same assistant message repeatedly, so entries are matched on message id
+and replaced rather than appended.
+
+It is the transcript, not a separate log: messages you send in the terminal show up here too.
+Tool calls are not shown, only prose.
+
 This is genuinely "type into my terminal over HTTP", which is why it is a separate endpoint
 from `/send` and why the server binds to loopback only. What guards it:
 
@@ -226,8 +236,9 @@ slow tool, so the badge says `stalled` rather than claiming to know which.
 ## Security
 
 **This dashboard exposes the text of your prompts.** Tiles show the last user message and
-last assistant reply for every session, and `/api` additionally carries the summaries and
-first ~700 characters of messages sessions send each other. That is real conversation content,
+last assistant reply for every session, `/thread` serves the last 24 turns of any session in
+full, and `/api` additionally carries the summaries and first ~700 characters of messages
+sessions send each other. That is real conversation content,
 not just counters. Treat the port like your terminal.
 
 - It binds to **loopback only**. Setting `HOST=0.0.0.0` publishes your prompts, working
@@ -294,6 +305,7 @@ anything that acts".
 | `POST /focus?pid=` | Raise that session's terminal tab. |
 | `POST /send?pid=&cmd=` | Run an allowlisted slash command. |
 | `POST /say?pid=` | Type the request body into that session's prompt. |
+| `GET /thread?pid=` | The last 24 turns of that session, for the composer. |
 | `POST /kill?pid=` | SIGTERM that session. |
 
 ## License

@@ -193,6 +193,16 @@
   #say .to { font-size: .76rem; color: var(--dim); margin-bottom: .35rem;
              display: flex; justify-content: space-between; gap: 1rem }
   #say .to b { color: var(--fg); font-weight: 600 }
+  #saylog { max-height: min(42vh, 26rem); overflow-y: auto; margin-bottom: .45rem;
+            font-size: .8rem; line-height: 1.45; display: flex; flex-direction: column; gap: .5rem }
+  #saylog:empty { display: none }
+  #saylog .m { white-space: pre-wrap; overflow-wrap: anywhere }
+  #saylog .m i { font-style: normal; font-size: .68rem; color: var(--dim);
+                 display: block; margin-bottom: .1rem }
+  #saylog .user { border-left: 2px solid var(--line); padding-left: .5rem }
+  #saylog .assistant { color: var(--dim) }
+  #saylog .assistant b { color: var(--fg); font-weight: 400 }
+  #saylog .err { color: var(--dim) }
   #say textarea { width: 100%; resize: vertical; min-height: 3.4rem; font: inherit; font-size: .84rem;
                   color: var(--fg); background: transparent; border: 1px solid var(--line);
                   border-radius: .4rem; padding: .4rem .5rem }
@@ -214,6 +224,7 @@
 <details id=habits open><summary>How you use Claude Code <small></small></summary><div class=hgrid></div></details>
 <div id=say>
   <div class=to><span>message <b id=sayto></b></span><span>enter to send · esc to close</span></div>
+  <div id=saylog></div>
   <textarea id=saytext rows=2 maxlength=2000 placeholder="type a message…"></textarea>
 </div>
 <div id=toast></div>
@@ -382,7 +393,7 @@ let IDLE_MS = 60e3, DEF_MODEL = null;
 // tick() rebuilds every tile every 2s, so an 'armed' class on the button is wiped
 // mid-decision - the second click then re-arms instead of sending. Keep it out here.
 let armed = null, armTimer = 0;
-let sayPid = null;                       // which session the composer is aimed at
+let sayPid = null, sayTimer = 0;         // which session the composer is aimed at
 
 // Nothing on disk records a session's context window: transcripts log the resolved model
 // name with the [1m] suffix stripped ("claude-opus-5" whether it is 200k or 1M) and the
@@ -599,14 +610,31 @@ const toast = m => { const t = document.getElementById('toast');
   t.textContent = m; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2600) };
 
 const sayBox = () => document.getElementById('say');
+
+async function loadThread() {
+  const pid = sayPid, box = document.getElementById('saylog');
+  if (pid == null) return;
+  let r; try { r = await (await fetch('/thread?pid=' + pid)).json() } catch { return }
+  if (sayPid !== pid) return;                            // composer moved on while we waited
+  if (!r.ok) return box.innerHTML = `<div class=err>${esc(r.error)}</div>`;
+  const atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
+  box.innerHTML = r.messages.map(m =>
+    `<div class="m ${m.role}"><i>${m.role === 'user' ? 'you' : esc(r.name)} · ${ago(m.at)} ago</i>${esc(m.text)}</div>`
+  ).join('');
+  if (atEnd) box.scrollTop = box.scrollHeight;           // only follow if already at the end
+}
+
 function openSay(pid, name) {
   sayPid = pid;
   document.getElementById('sayto').textContent = name;
+  document.getElementById('saylog').innerHTML = '';
   sayBox().classList.add('on');
   const t = document.getElementById('saytext');
   t.focus(); t.setSelectionRange(t.value.length, t.value.length);
+  loadThread();
+  clearInterval(sayTimer); sayTimer = setInterval(loadThread, 2000);
 }
-function closeSay() { sayPid = null; sayBox().classList.remove('on') }
+function closeSay() { sayPid = null; clearInterval(sayTimer); sayBox().classList.remove('on') }
 
 document.getElementById('saytext').addEventListener('keydown', async e => {
   if (e.key === 'Escape') return closeSay();
@@ -614,11 +642,10 @@ document.getElementById('saytext').addEventListener('keydown', async e => {
   e.preventDefault();
   const t = e.target, text = t.value.trim(), pid = sayPid;
   if (!text || pid == null) return;
-  t.value = ''; closeSay();
+  t.value = '';
   const r = await (await fetch('/say?pid=' + pid, { method: 'POST', body: text })).json();
-  toast(r.ok ? `sent to ${r.app}${r.queued ? ' (queued - session is mid-turn)' : ''}`
-             : `couldn't send: ${r.error}`);
-  if (!r.ok) { t.value = text; openSay(pid, document.getElementById('sayto').textContent) }
+  if (r.ok) { loadThread(); if (r.queued) toast('queued - session is mid-turn') }
+  else { t.value = text; toast(`couldn't send: ${r.error}`) }
 });
 
 document.addEventListener('click', async e => {
