@@ -198,6 +198,9 @@
   #talk .to { font-size: .76rem; color: var(--dim); margin-bottom: .35rem;
              display: flex; justify-content: space-between; gap: 1rem }
   #talk .to b { color: var(--fg); font-weight: 600 }
+  #talkclose { cursor: pointer; font: inherit; font-size: .95rem; line-height: 1; vertical-align: -.05em;
+               background: none; border: 0; color: var(--dim); padding: 0 .1rem; margin-left: .25rem }
+  #talkclose:hover { color: #c9584f }
   #talk .foot { display: flex; justify-content: space-between; align-items: center;
                 margin-top: .4rem; font-size: .72rem; color: var(--dim) }
   #talksend { font: inherit; font-size: .76rem; cursor: pointer; padding: .15rem .8rem;
@@ -234,7 +237,8 @@
 <details id=spend open><summary>Tokens spent <small></small></summary><div class=hgrid></div></details>
 <details id=habits open><summary>How you use Claude Code <small></small></summary><div class=hgrid></div></details>
 <div id=talk>
-  <div class=to><span>message <b id=talkto></b></span><span>enter to send · esc to close</span></div>
+  <div class=to><span>message <b id=talkto></b></span>
+    <span>enter to send · esc to close <button id=talkclose title="close">&times;</button></span></div>
   <div id=talklog></div>
   <textarea id=talktext rows=2 maxlength=2000 placeholder="type a message…"></textarea>
   <div class=foot><span>shift+enter for a newline</span><button id=talksend>send</button></div>
@@ -663,6 +667,7 @@ async function sendTalk() {
   else { t.value = text; toast(`couldn't send: ${r.error}`) }
 }
 document.getElementById('talksend').addEventListener('click', e => { e.stopPropagation(); sendTalk() });
+document.getElementById('talkclose').addEventListener('click', e => { e.stopPropagation(); closeTalk() });
 document.getElementById('talktext').addEventListener('keydown', e => {
   if (e.key === 'Escape') return closeTalk();
   if (e.key !== 'Enter' || e.shiftKey) return;      // shift+enter for a newline while drafting

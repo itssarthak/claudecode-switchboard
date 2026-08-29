@@ -67,7 +67,7 @@ sorted by tokens burned.
 - Click a tile to focus that session's terminal tab.
 - Hover a tile for a **`talk`** button, bottom-right, to chat with that session — the composer shows the last
   24 turns and stays open after you send, so the reply lands in front of you. Enter sends, Esc
-  closes, shift+Enter is a newline. See [Messaging a session](#messaging-a-session).
+  or the × closes, shift+Enter is a newline. See [Messaging a session](#messaging-a-session).
 - Hover a tile for a `compact` button — click once to arm, again within 6s to send `/compact`.
 - Hover for a `kill` button — sends SIGTERM after a confirmation prompt.
 - When one session messages another, an envelope flies between the two tiles and opens into
