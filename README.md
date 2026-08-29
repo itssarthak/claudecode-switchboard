@@ -31,8 +31,12 @@ sorted by tokens burned.
 
 **Per tile**
 - Status — `busy` / `idle` / `unknown` / `stale`, colour-coded, with the legend up top,
-  followed by the session **kind** — `interactive` for a terminal tab, `bg` for one started
-  with `claude --bg`.
+  followed by what the session **is right now** — `interactive`, `bg` for a headless one,
+  `bg · attached` for a background session you have attached to a tab, `parked` for an
+  ordinary session sitting behind a background job. This is derived from whether the process
+  holds a tty, not from the registry's `kind`, which is written once at launch and never
+  corrected: attach a `bg` session and it still claims `bg`; park an interactive one and it
+  still claims `interactive`.
   Liveness is a real `kill(pid, 0)` check, not the `status` field, which is only written
   on busy↔idle transitions and never at all by SDK sessions.
 - What it's doing — the last real user prompt, the last assistant reply, and for busy
@@ -220,10 +224,13 @@ from `/send` and why the server binds to loopback only. What guards it:
 
 Cursor and VS Code sessions can't be messaged, for the same reason they can't be focused.
 
-**Background sessions can't be messaged either.** A session started with `claude --bg` runs
+**Headless sessions can't be messaged either.** A session started with `claude --bg` runs
 under a pty-host with no terminal tab — `ps` reports its tty as `??`, so there is nothing to
 type into. Its `talk` button is disabled and says so; reach it with `claude attach <id>`, or
 `claude agents --json` to list them (the rows carrying an `id` are the background ones).
+
+Attach one and it becomes reachable — the badge flips to `bg · attached` and `talk` enables,
+because the test is the tty, not how the session was launched.
 
 ## Waiting vs stalled
 

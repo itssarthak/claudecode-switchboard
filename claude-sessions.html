@@ -431,6 +431,22 @@ const waiting = r => r.alive && r.status === 'idle' && r.statusUpdatedAt > 0
 const stalled = r => r.alive && r.status === 'busy' && r.usage?.lastAt
                   && Date.now() - r.usage.lastAt >= IDLE_MS && !r.usage.burn;
 
+// `kind` in the registry is write-once at launch: attach a bg session and it still says
+// "bg"; park an interactive one behind a job and it still says "interactive". What is true
+// right now is whether the process holds a tty.
+const kindOf = r =>
+  r.headless ? 'bg'
+  : r.kind === 'bg' ? 'bg · attached'
+  : r.parkedJobId ? 'parked'
+  : 'interactive';
+
+const kindWhy = r =>
+  r.headless ? `started with claude --bg and has no terminal (tty ${r.tty || '?'}) - `
+             + `nothing can be typed into it. Reach it with: claude attach ${r.jobId || ''}`
+  : r.kind === 'bg' ? `started with claude --bg but is attached to ${r.tty}, so it can be typed into`
+  : r.parkedJobId ? `an ordinary session, currently parked behind background job ${r.parkedJobId} on ${r.tty}`
+  : `an ordinary session in a terminal tab on ${r.tty}`;
+
 function tile(r) {
   const state = !r.alive ? 'stale' : (r.status || 'unknown');
   const u = r.usage;
@@ -451,10 +467,8 @@ function tile(r) {
       r.alive ? `<button class="cmd ${armed === r.pid + ':compact' ? 'armed' : ''}" data-cmd=compact>${
                    armed === r.pid + ':compact' ? '/compact?' : 'compact'}</button>
                  <button class=kill title="send SIGTERM to pid ${r.pid}">kill</button>` : ''}</div>
-    <div class=sub>${state}${r.kind ? ` · <span class=kind title="${
-      r.kind === 'bg' ? 'started with claude --bg - runs headless, no terminal tab'
-      : r.kind === 'interactive' ? 'a normal session in a terminal tab'
-      : 'session kind as reported by Claude Code'}">${esc(r.kind)}</span>` : ''} · pid ${r.pid}${
+    <div class=sub>${state}${r.alive ? ` · <span class=kind title="${esc(kindWhy(r))}">${
+      esc(kindOf(r))}</span>` : ''} · pid ${r.pid}${
       r.startedAt ? ` · up ${ago(r.startedAt)}` : ''}${
       u?.lastAt ? ` · active ${ago(u.lastAt)} ago` : ''}</div>
     <div class=sub>${esc((u?.model || r.version || '').replace('claude-', ''))}${
@@ -485,8 +499,8 @@ function tile(r) {
         u.sidechain ? ` · ${u.sidechain} subagent` : ''}</div>
       ${top ? `<div class=tools>${esc(top)}</div>` : ''}
     </details>` : ''}
-    ${!r.alive ? '' : r.kind === 'bg'
-      ? `<button class=talk disabled title="background session - no terminal to type into. Reach it with: claude attach ${esc(r.jobId || '')}">talk</button>`
+    ${!r.alive ? '' : r.headless
+      ? `<button class=talk disabled title="${esc(kindWhy(r))}">talk</button>`
       : `<button class=talk title="chat with this session">talk</button>`}
   </div>`;
 }

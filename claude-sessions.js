@@ -220,13 +220,33 @@ function threadOf(pid) {
            messages: parsed.get(t)?.thread || [] };
 }
 
-const scan = () => !fs.existsSync(SESSIONS) ? [] : fs.readdirSync(SESSIONS).filter(f => f.endsWith('.json')).map(f => {
+// `kind` records how a session was launched and is never rewritten, so an attached bg
+// session still says "bg" and a parked interactive one still says "interactive". The tty is
+// the honest signal: no tty means nothing can be typed into it. One ps for the whole scan.
+function ttyMap() {
+  const m = new Map();
   try {
-    const s = JSON.parse(fs.readFileSync(path.join(SESSIONS, f), 'utf8'));
-    const t = transcriptOf(s.sessionId);
-    return { ...s, alive: alive(s.pid), usage: t ? usage(t) : null };
-  } catch { return null }
-}).filter(Boolean).sort((a, b) => (b.alive - a.alive) || (b.startedAt - a.startedAt));
+    for (const l of execFileSync('ps', ['-eo', 'pid=,tty=']).toString().split('\n')) {
+      const x = l.trim().match(/^(\d+)\s+(\S+)$/);
+      if (x) m.set(+x[1], x[2]);
+    }
+  } catch {}
+  return m;
+}
+
+const scan = () => {
+  if (!fs.existsSync(SESSIONS)) return [];
+  const ttys = ttyMap();
+  return fs.readdirSync(SESSIONS).filter(f => f.endsWith('.json')).map(f => {
+    try {
+      const s = JSON.parse(fs.readFileSync(path.join(SESSIONS, f), 'utf8'));
+      const t = transcriptOf(s.sessionId);
+      const tty = ttys.get(s.pid) || null;
+      return { ...s, alive: alive(s.pid), tty, headless: !/^ttys?\d+$/.test(tty || ''),
+               usage: t ? usage(t) : null };
+    } catch { return null }
+  }).filter(Boolean).sort((a, b) => (b.alive - a.alive) || (b.startedAt - a.startedAt));
+};
 
 // --- self-check: incremental parse must equal a one-shot parse, and repeat polls must not drift
 // The text lands inside an AppleScript string literal, so only \ and " can break out of it.
