@@ -26,7 +26,7 @@
 
   .grid { display: grid; gap: .7rem; grid-template-columns: repeat(auto-fit, minmax(16rem, 21rem)) }
   .tile { position: relative;
-          border: 1px solid var(--c, var(--line)); border-radius: .6rem; padding: .85rem .95rem;
+          border: 1px solid var(--c, var(--line)); border-radius: .6rem; padding: .85rem .95rem 1.6rem;
           background: color-mix(in srgb, var(--c) 5%, transparent);
           cursor: pointer; transition: transform .08s ease, background .15s }
   .tile:hover { transform: translateY(-2px); background: color-mix(in srgb, var(--c) 14%, transparent) }
@@ -57,15 +57,20 @@
          border: 1px solid var(--line); border-radius: .3rem; padding: .05rem .4rem;
          background: transparent; color: var(--dim); opacity: 0; transition: opacity .15s }
   .tile:hover .cmd, .cmd.armed { opacity: 1 }
-  .say { margin-left: auto; flex: none; font: inherit; font-size: .68rem; cursor: pointer;
-         border: 1px solid var(--line); border-radius: .25rem; padding: .05rem .4rem;
-         background: transparent; color: var(--dim); opacity: 0; transition: opacity .15s }
-  .tile:hover .say { opacity: 1 }
+  .talk { position: absolute; right: .6rem; bottom: .5rem; font: inherit; font-size: .68rem;
+          cursor: pointer; border: 1px solid var(--line); border-radius: .25rem;
+          padding: .05rem .45rem; background: var(--bg); color: var(--dim);
+          opacity: 0; transition: opacity .15s }
+  .tile:hover .talk { opacity: 1 }
+  .talk[disabled] { cursor: not-allowed }
+  .tile:hover .talk[disabled] { opacity: .35 }
   .cmd.armed { color: var(--c); border-color: var(--c) }
   .dot { font-size: .62em; line-height: 1; color: var(--c) }
   .busy { --c: #d99a45 } .idle { --c: #4c9a5a } .stale { --c: #8b8b8b } .unknown { --c: #6b8fd4 }
   .sub { font-size: .76rem; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
   .sub .old { opacity: .6; font-style: italic }
+  .sub .kind { border: 1px solid var(--line); border-radius: .25rem; padding: 0 .3rem;
+               font-size: .92em }
   .guess { font-style: normal; opacity: .45; padding-left: .1em }
 
   .ctx { margin: .7rem 0 .55rem }
@@ -185,28 +190,34 @@
 
   /* Lives outside #groups on purpose: tick() rebuilds every tile every 2s, which would
      eat the draft and the caret. Same lesson the compact arm taught. */
-  #say { position: fixed; left: 50%; bottom: 1.2rem; transform: translateX(-50%); z-index: 60;
+  #talk { position: fixed; left: 50%; bottom: 1.2rem; transform: translateX(-50%); z-index: 60;
          width: min(46rem, calc(100vw - 3rem)); display: none;
          border: 1px solid var(--line); border-radius: .6rem; padding: .55rem .7rem;
          background: var(--bg); box-shadow: 0 8px 28px -10px rgba(0,0,0,.6) }
-  #say.on { display: block }
-  #say .to { font-size: .76rem; color: var(--dim); margin-bottom: .35rem;
+  #talk.on { display: block }
+  #talk .to { font-size: .76rem; color: var(--dim); margin-bottom: .35rem;
              display: flex; justify-content: space-between; gap: 1rem }
-  #say .to b { color: var(--fg); font-weight: 600 }
-  #saylog { max-height: min(42vh, 26rem); overflow-y: auto; margin-bottom: .45rem;
+  #talk .to b { color: var(--fg); font-weight: 600 }
+  #talk .foot { display: flex; justify-content: space-between; align-items: center;
+                margin-top: .4rem; font-size: .72rem; color: var(--dim) }
+  #talksend { font: inherit; font-size: .76rem; cursor: pointer; padding: .15rem .8rem;
+              border: 1px solid var(--line); border-radius: .3rem;
+              background: transparent; color: var(--fg) }
+  #talksend:hover { border-color: color-mix(in srgb, currentColor 45%, transparent) }
+  #talklog { max-height: min(42vh, 26rem); overflow-y: auto; margin-bottom: .45rem;
             font-size: .8rem; line-height: 1.45; display: flex; flex-direction: column; gap: .5rem }
-  #saylog:empty { display: none }
-  #saylog .m { white-space: pre-wrap; overflow-wrap: anywhere }
-  #saylog .m i { font-style: normal; font-size: .68rem; color: var(--dim);
+  #talklog:empty { display: none }
+  #talklog .m { white-space: pre-wrap; overflow-wrap: anywhere }
+  #talklog .m i { font-style: normal; font-size: .68rem; color: var(--dim);
                  display: block; margin-bottom: .1rem }
-  #saylog .user { border-left: 2px solid var(--line); padding-left: .5rem }
-  #saylog .assistant { color: var(--dim) }
-  #saylog .assistant b { color: var(--fg); font-weight: 400 }
-  #saylog .err { color: var(--dim) }
-  #say textarea { width: 100%; resize: vertical; min-height: 3.4rem; font: inherit; font-size: .84rem;
+  #talklog .user { border-left: 2px solid var(--line); padding-left: .5rem }
+  #talklog .assistant { color: var(--dim) }
+  #talklog .assistant b { color: var(--fg); font-weight: 400 }
+  #talklog .err { color: var(--dim) }
+  #talk textarea { width: 100%; resize: vertical; min-height: 3.4rem; font: inherit; font-size: .84rem;
                   color: var(--fg); background: transparent; border: 1px solid var(--line);
                   border-radius: .4rem; padding: .4rem .5rem }
-  #say textarea:focus { outline: none; border-color: color-mix(in srgb, currentColor 40%, transparent) }
+  #talk textarea:focus { outline: none; border-color: color-mix(in srgb, currentColor 40%, transparent) }
   #toast { position: fixed; bottom: 1.4rem; left: 50%; transform: translateX(-50%);
            background: #1c1c1c; color: #f0f0f0; padding: .6rem 1rem; border-radius: .5rem;
            font-size: .82rem; opacity: 0; transition: opacity .2s; pointer-events: none }
@@ -222,10 +233,11 @@
 <div id=groups></div>
 <details id=spend open><summary>Tokens spent <small></small></summary><div class=hgrid></div></details>
 <details id=habits open><summary>How you use Claude Code <small></small></summary><div class=hgrid></div></details>
-<div id=say>
-  <div class=to><span>message <b id=sayto></b></span><span>enter to send · esc to close</span></div>
-  <div id=saylog></div>
-  <textarea id=saytext rows=2 maxlength=2000 placeholder="type a message…"></textarea>
+<div id=talk>
+  <div class=to><span>message <b id=talkto></b></span><span>enter to send · esc to close</span></div>
+  <div id=talklog></div>
+  <textarea id=talktext rows=2 maxlength=2000 placeholder="type a message…"></textarea>
+  <div class=foot><span>shift+enter for a newline</span><button id=talksend>send</button></div>
 </div>
 <div id=toast></div>
 <script>
@@ -393,7 +405,7 @@ let IDLE_MS = 60e3, DEF_MODEL = null;
 // tick() rebuilds every tile every 2s, so an 'armed' class on the button is wiped
 // mid-decision - the second click then re-arms instead of sending. Keep it out here.
 let armed = null, armTimer = 0;
-let sayPid = null, sayTimer = 0;         // which session the composer is aimed at
+let talkPid = null, talkTimer = 0;         // which session the composer is aimed at
 
 // Nothing on disk records a session's context window: transcripts log the resolved model
 // name with the [1m] suffix stripped ("claude-opus-5" whether it is 200k or 1M) and the
@@ -432,11 +444,14 @@ function tile(r) {
       : waiting(r) ? `<span class="wait ${Date.now() - r.statusUpdatedAt < 36e5 ? 'fresh' : ''}"
                     title="quiet for ${ago(r.statusUpdatedAt)} — Claude Code has notified you it is waiting for input"
                     >waiting ${ago(r.statusUpdatedAt)}</span>` : ''}${
-      r.alive ? `<button class=say title="type a message into this session's prompt">say</button>
-                 <button class="cmd ${armed === r.pid + ':compact' ? 'armed' : ''}" data-cmd=compact>${
+      r.alive ? `<button class="cmd ${armed === r.pid + ':compact' ? 'armed' : ''}" data-cmd=compact>${
                    armed === r.pid + ':compact' ? '/compact?' : 'compact'}</button>
                  <button class=kill title="send SIGTERM to pid ${r.pid}">kill</button>` : ''}</div>
-    <div class=sub>${state} · pid ${r.pid}${r.startedAt ? ` · up ${ago(r.startedAt)}` : ''}${
+    <div class=sub>${state}${r.kind ? ` · <span class=kind title="${
+      r.kind === 'bg' ? 'started with claude --bg - runs headless, no terminal tab'
+      : r.kind === 'interactive' ? 'a normal session in a terminal tab'
+      : 'session kind as reported by Claude Code'}">${esc(r.kind)}</span>` : ''} · pid ${r.pid}${
+      r.startedAt ? ` · up ${ago(r.startedAt)}` : ''}${
       u?.lastAt ? ` · active ${ago(u.lastAt)} ago` : ''}</div>
     <div class=sub>${esc((u?.model || r.version || '').replace('claude-', ''))}${
       u?.effort ? ` · ${esc(u.effort)}` : ''}${
@@ -466,6 +481,9 @@ function tile(r) {
         u.sidechain ? ` · ${u.sidechain} subagent` : ''}</div>
       ${top ? `<div class=tools>${esc(top)}</div>` : ''}
     </details>` : ''}
+    ${!r.alive ? '' : r.kind === 'bg'
+      ? `<button class=talk disabled title="background session - no terminal to type into. Reach it with: claude attach ${esc(r.jobId || '')}">talk</button>`
+      : `<button class=talk title="chat with this session">talk</button>`}
   </div>`;
 }
 
@@ -609,13 +627,13 @@ async function tick() {
 const toast = m => { const t = document.getElementById('toast');
   t.textContent = m; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2600) };
 
-const sayBox = () => document.getElementById('say');
+const talkBox = () => document.getElementById('talk');
 
 async function loadThread() {
-  const pid = sayPid, box = document.getElementById('saylog');
+  const pid = talkPid, box = document.getElementById('talklog');
   if (pid == null) return;
   let r; try { r = await (await fetch('/thread?pid=' + pid)).json() } catch { return }
-  if (sayPid !== pid) return;                            // composer moved on while we waited
+  if (talkPid !== pid) return;                            // composer moved on while we waited
   if (!r.ok) return box.innerHTML = `<div class=err>${esc(r.error)}</div>`;
   const atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
   box.innerHTML = r.messages.map(m =>
@@ -624,36 +642,39 @@ async function loadThread() {
   if (atEnd) box.scrollTop = box.scrollHeight;           // only follow if already at the end
 }
 
-function openSay(pid, name) {
-  sayPid = pid;
-  document.getElementById('sayto').textContent = name;
-  document.getElementById('saylog').innerHTML = '';
-  sayBox().classList.add('on');
-  const t = document.getElementById('saytext');
+function openTalk(pid, name) {
+  talkPid = pid;
+  document.getElementById('talkto').textContent = name;
+  document.getElementById('talklog').innerHTML = '';
+  talkBox().classList.add('on');
+  const t = document.getElementById('talktext');
   t.focus(); t.setSelectionRange(t.value.length, t.value.length);
   loadThread();
-  clearInterval(sayTimer); sayTimer = setInterval(loadThread, 2000);
+  clearInterval(talkTimer); talkTimer = setInterval(loadThread, 2000);
 }
-function closeSay() { sayPid = null; clearInterval(sayTimer); sayBox().classList.remove('on') }
+function closeTalk() { talkPid = null; clearInterval(talkTimer); talkBox().classList.remove('on') }
 
-document.getElementById('saytext').addEventListener('keydown', async e => {
-  if (e.key === 'Escape') return closeSay();
-  if (e.key !== 'Enter' || e.shiftKey) return;      // shift+enter for a newline while drafting
-  e.preventDefault();
-  const t = e.target, text = t.value.trim(), pid = sayPid;
+async function sendTalk() {
+  const t = document.getElementById('talktext'), text = t.value.trim(), pid = talkPid;
   if (!text || pid == null) return;
-  t.value = '';
-  const r = await (await fetch('/say?pid=' + pid, { method: 'POST', body: text })).json();
+  t.value = ''; t.focus();
+  const r = await (await fetch('/talk?pid=' + pid, { method: 'POST', body: text })).json();
   if (r.ok) { loadThread(); if (r.queued) toast('queued - session is mid-turn') }
   else { t.value = text; toast(`couldn't send: ${r.error}`) }
+}
+document.getElementById('talksend').addEventListener('click', e => { e.stopPropagation(); sendTalk() });
+document.getElementById('talktext').addEventListener('keydown', e => {
+  if (e.key === 'Escape') return closeTalk();
+  if (e.key !== 'Enter' || e.shiftKey) return;      // shift+enter for a newline while drafting
+  e.preventDefault(); sendTalk();
 });
 
 document.addEventListener('click', async e => {
-  const sb = e.target.closest('.say');
+  const sb = e.target.closest('.talk');
   if (sb) {
     e.stopPropagation();
     const tile = sb.closest('.tile');
-    return openSay(+tile.dataset.pid, tile.querySelector('.name .txt')?.textContent || tile.dataset.pid);
+    return openTalk(+tile.dataset.pid, tile.querySelector('.name .txt')?.textContent || tile.dataset.pid);
   }
   const kb = e.target.closest('.kill');
   if (kb) {

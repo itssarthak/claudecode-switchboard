@@ -30,7 +30,9 @@ Sessions are read from `~/.claude/sessions/*.json` and grouped by working direct
 sorted by tokens burned.
 
 **Per tile**
-- Status — `busy` / `idle` / `unknown` / `stale`, colour-coded, with the legend up top.
+- Status — `busy` / `idle` / `unknown` / `stale`, colour-coded, with the legend up top,
+  followed by the session **kind** — `interactive` for a terminal tab, `bg` for one started
+  with `claude --bg`.
   Liveness is a real `kill(pid, 0)` check, not the `status` field, which is only written
   on busy↔idle transitions and never at all by SDK sessions.
 - What it's doing — the last real user prompt, the last assistant reply, and for busy
@@ -63,7 +65,7 @@ sorted by tokens burned.
 
 **Interactions**
 - Click a tile to focus that session's terminal tab.
-- Hover a tile for a **`say`** button to chat with that session — the composer shows the last
+- Hover a tile for a **`talk`** button, bottom-right, to chat with that session — the composer shows the last
   24 turns and stays open after you send, so the reply lands in front of you. Enter sends, Esc
   closes, shift+Enter is a newline. See [Messaging a session](#messaging-a-session).
 - Hover a tile for a `compact` button — click once to arm, again within 6s to send `/compact`.
@@ -190,7 +192,7 @@ and `~/.claude/sessions/*.json` carries no model at all. Two things are knowable
 
 ## Messaging a session
 
-`say` types your text into that session's prompt and presses Enter, over the same AppleScript
+`talk` types your text into that session's prompt and presses Enter, over the same AppleScript
 path as `/compact`. It is the real prompt, so the session answers exactly as if you had typed
 it in the terminal — and it queues if the session is mid-turn.
 
@@ -217,6 +219,11 @@ from `/send` and why the server binds to loopback only. What guards it:
 - The prompt rides in the request body, never the query string, so it stays out of any log.
 
 Cursor and VS Code sessions can't be messaged, for the same reason they can't be focused.
+
+**Background sessions can't be messaged either.** A session started with `claude --bg` runs
+under a pty-host with no terminal tab — `ps` reports its tty as `??`, so there is nothing to
+type into. Its `talk` button is disabled and says so; reach it with `claude attach <id>`, or
+`claude agents --json` to list them (the rows carrying an `id` are the background ones).
 
 ## Waiting vs stalled
 
@@ -253,7 +260,7 @@ not just counters. Treat the port like your terminal.
 - `/send` accepts an **allowlist** — `compact`, `context`, `cost`, `status` — and nothing
   else. The target pid must be live and present in the session registry, and its tty must
   match `^ttys?\d+$`.
-- `/say` **is** the general "type into my terminal" endpoint, deliberately kept separate so
+- `/talk` **is** the general "type into my terminal" endpoint, deliberately kept separate so
   the two can be reasoned about apart. Same pid and tty checks, plus control-character
   stripping, a length cap, and AppleScript literal escaping. See
   [Messaging a session](#messaging-a-session).
@@ -283,7 +290,7 @@ anything that acts".
 - **No cost estimates.** Token counts are volume, not dollars; prices aren't on disk and
   guessing them would be worse than omitting them.
 - AppleScript blocks the event loop for up to 5s on a focus or send.
-- `--selftest` covers token accounting and the `/say` sanitiser. The AppleScript and quota
+- `--selftest` covers token accounting and the `/talk` sanitiser. The AppleScript and quota
   paths are verified by hand.
 
 ## Files
@@ -304,7 +311,7 @@ anything that acts".
 | `GET /patterns` | How you use Claude Code — hours, weekdays, tools, models, prompt stats. |
 | `POST /focus?pid=` | Raise that session's terminal tab. |
 | `POST /send?pid=&cmd=` | Run an allowlisted slash command. |
-| `POST /say?pid=` | Type the request body into that session's prompt. |
+| `POST /talk?pid=` | Type the request body into that session's prompt. |
 | `GET /thread?pid=` | The last 24 turns of that session, for the composer. |
 | `POST /kill?pid=` | SIGTERM that session. |
 
