@@ -307,6 +307,13 @@ anything that acts".
 - `--selftest` covers token accounting and the `/talk` sanitiser. The AppleScript and quota
   paths are verified by hand.
 
+## Contributing
+
+Changing anything here? **Add an entry to [WORKLOG.md](WORKLOG.md)** — why, how you verified it,
+and what you tried that didn't work. `git log` covers what changed; the worklog covers the rest,
+including the dead ends, so they don't get walked twice. [CLAUDE.md](CLAUDE.md) has the house
+rules.
+
 ## Files
 
 | File | |
@@ -314,6 +321,8 @@ anything that acts".
 | `claude-sessions.js` | Server: registry scan, transcript parser, rollup, focus/send, quota. |
 | `claude-sessions.html` | The whole UI. Vanilla JS, no build. |
 | `claude-sessions.sh` | A `jq` one-liner that dumps the same session table to a terminal. |
+| `WORKLOG.md` | Why each change was made, how it was verified, what was rejected. |
+| `CLAUDE.md` | House rules for anyone — human or agent — working in this repo. |
 
 ## Endpoints
 
