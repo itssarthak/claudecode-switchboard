@@ -183,6 +183,12 @@
   .chat .log { display: flex; flex-direction: column; gap: .6rem;
                margin-top: .6rem; max-height: 24rem; overflow-y: auto }
   .chat .who { font-size: .78rem; line-height: 1.45 }
+  /* sender and recipient each get their own hue so neither reads as body text, and the pair
+     is told apart at a glance. Blue is already the message colour on the flying note. The
+     dark pair is too pale on white (2.4:1 for the amber), so each gets a darker shade there.
+     The plain hex first is the fallback for a browser without light-dark(). */
+  .chat .who .f { color: #6b8fd4; color: light-dark(#3f63a8, #6b8fd4) }
+  .chat .who .r { color: #d99a45; color: light-dark(#96600f, #d99a45) }
   .chat .who .arr { color: var(--dim); margin: 0 .3rem }
   .chat .t { color: var(--dim); font-size: .7rem; margin-left: .35rem }
   .chat .blind { color: var(--dim); font-weight: 400 }
@@ -738,7 +744,7 @@ function chatterFor(cwd, feed) {
     <summary>chatter <small>${rows.length}${hour ? ` · ${hour} this hour` : ''}</small></summary>
     <div class=log>${rows.map(r => `
       <div class=m>
-        <div class=who><b>${esc(r.from)}</b><span class=arr>&rarr;</span><b>${esc(
+        <div class=who><b class=f>${esc(r.from)}</b><span class=arr>&rarr;</span><b class=r>${esc(
           r.tos.slice(0, 3).join(', ') + (r.tos.length > 3 ? ` +${r.tos.length - 3}` : ''))}</b>
           <span class=t title="${esc(new Date(r.at).toLocaleString())}">${ago(r.at)}</span>${
           r.blind ? '<span class=blind> &middot; not seen arriving</span>' : ''}</div>
