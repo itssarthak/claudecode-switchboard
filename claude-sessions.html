@@ -171,9 +171,9 @@
   #spend[open] > summary::before, #habits[open] > summary::before { transform: rotate(90deg) }
   #spend > summary small, #habits > summary small { font-weight: 400; color: var(--dim); font-size: .8rem; margin-left: .5rem }
   /* the panel sits beside its project's tiles, so it scopes to the agents in that project */
-  .gwrap { display: grid; grid-template-columns: minmax(0, 1fr) 30rem; gap: 1rem; align-items: start }
+  .gwrap { display: grid; grid-template-columns: minmax(0, 1fr) 600px; gap: 1rem; align-items: start }
   .gwrap.solo { grid-template-columns: 1fr }
-  @media (max-width: 1280px) { .gwrap { grid-template-columns: 1fr } }
+  @media (max-width: 1200px) { .gwrap { grid-template-columns: 1fr } }
   .chat { border: 1px solid var(--line); border-radius: .6rem; padding: .55rem .7rem }
   .chat > summary { cursor: pointer; list-style: none; font-size: .78rem; font-weight: 600 }
   .chat > summary::-webkit-details-marker { display: none }
