@@ -58,8 +58,8 @@ sorted by tokens burned.
 - **Live plan usage** — your actual 5-hour and weekly limits as percentages, with reset
   times. See [Plan usage](#plan-usage) for how this works.
 - **Derived weekly budget** — what 100% is *in tokens*, how much is left, your run rate per
-  day, **the rate that would land exactly on the reset**, and whether you'll run dry before it.
-  See [Weekly budget](#weekly-budget).
+  day, and whether you'll run dry before the reset. The rate that would land exactly on the reset
+  shows as `target N/day` under *all tokens today*. See [Weekly budget](#weekly-budget).
 
 **Two sections below the tiles**
 - **Tokens spent** — per day for the last 30, and per quota week, from the persistent ledger.

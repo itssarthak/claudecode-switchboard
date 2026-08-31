@@ -482,8 +482,6 @@ function renderBudget(b) {
     <span><b>${k(w.tokensUsed)}</b> <i>used (${w.percentUsed}%)</i></span>
     <span><b>${k(w.tokensRemaining)}</b> <i>left</i></span>
     <span><b>${k(w.runRatePerDay)}</b><i>/day run rate</i></span>
-    ${w.suggestedRatePerDay == null ? '' : `<span title="what is left divided by the time left before the reset — spend at this rate and the week ends exactly as the quota does. It is a target, not a verdict: whether you are ahead or behind is what 'projected' says."><b>${
-      k(w.suggestedRatePerDay)}</b><i>/day to finish on time</i></span>`}
     <span><b>${k(w.projectedFullWeek)}</b> <i>projected =</i> <b class="${over ? 'over' : 'under'}">${w.projectedPercent}%</b></span>
     ${out ? `<span class="${over ? 'over' : 'under'}">${over ? `runs out ${short(out)}` : `resets first ${short(reset)}`}</span>
              <i>${gap != null ? `${gap < 24 ? Math.round(gap) + 'h' : Math.round(gap / 24) + 'd'} ${over ? 'before reset' : 'to spare'}` : ''}</i>` : ''}
