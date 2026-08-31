@@ -67,6 +67,7 @@
   .cmd.armed { color: var(--c); border-color: var(--c) }
   .dot { font-size: .62em; line-height: 1; color: var(--c) }
   .busy { --c: #d99a45 } .idle { --c: #4c9a5a } .stale { --c: #8b8b8b } .unknown { --c: #6b8fd4 }
+  .blocked { --c: #a07cc6 }
   .sub { font-size: .76rem; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
   .sub .old { opacity: .6; font-style: italic }
   .sub .kind { border: 1px solid var(--line); border-radius: .25rem; padding: 0 .3rem;
@@ -293,6 +294,7 @@ const STATES = {
   idle:    'alive, waiting for input',
   unknown: 'alive, never reported a status (SDK sessions)',
   stale:   'process gone - last known state',
+  blocked: 'background job with no process - resume it with claude attach',
 };
 document.getElementById('legend').innerHTML = Object.entries(STATES).map(([k, v]) =>
   `<span class="key ${k}"><span class=dot>●</span><b>${k}</b><span>${v}</span></span>`).join('')
@@ -460,7 +462,8 @@ function flights(sessions) {
 const openTiles = new Set();
 document.addEventListener('toggle', e => {
   const t = e.target.closest?.('.tile'); if (!t || !e.target.matches('details.more')) return;
-  e.target.open ? openTiles.add(t.dataset.pid) : openTiles.delete(t.dataset.pid);
+  const id = t.dataset.pid ?? `job:${t.dataset.job}`;
+  e.target.open ? openTiles.add(id) : openTiles.delete(id);
 }, true);                                     // 'toggle' does not bubble - capture instead
 
 // derived weekly budget: reported % paired with measured tokens
@@ -530,15 +533,22 @@ const kindWhy = r =>
   : `an ordinary session in a terminal tab on ${r.tty}`;
 
 function tile(r) {
-  const state = !r.alive ? 'stale' : (r.status || 'unknown');
+  // a background job has no process, but it is not stale either - it is parked and resumable,
+  // so it keeps its own state rather than being painted as a dead session
+  const state = r.job ? (r.status === 'blocked' ? 'blocked' : 'unknown')
+                      : !r.alive ? 'stale' : (r.status || 'unknown');
+  const id = r.pid ?? `job:${r.job}`;               // pid is the key everywhere else
   const u = r.usage;
   const { win, why, guess } = windowOf(u);
   // model and effort only exist on assistant replies, so they are as old as the last one
   const oldCfg = u?.modelAt && u.lastAt - u.modelAt > 6e4;
   const top = u ? Object.entries(u.byTool).sort((a, b) => b[1] - a[1]).slice(0, 3)
                   .map(([n, c]) => `${n.replace(/^mcp__[^_]+__/, '')} ${c}`).join('  ·  ') : '';
-  return `<div class="tile ${state} ${r.alive ? '' : 'dead'}" data-pid="${r.pid}"
-       title="${esc(r.sessionId)}\n${esc(r.cwd)}\nclick to focus this terminal">
+  return `<div class="tile ${state} ${r.alive || r.job ? '' : 'dead'}"${
+       r.pid ? ` data-pid="${r.pid}"` : ` data-job="${esc(r.job)}"`}
+       title="${esc(r.sessionId)}\n${esc(r.cwd)}\n${r.job
+         ? `background job - no terminal to focus. Open it with: claude attach ${esc(r.job)}`
+         : 'click to focus this terminal'}">
     <div class=name><span class=dot>●</span><span class=txt>${esc(r.name || r.sessionId?.slice(0, 8))}</span>${
       stalled(r) ? `<span class="wait stall fresh"
                     title="busy, but nothing written and no tokens burned for ${ago(r.usage.lastAt)} — most likely sitting on a permission prompt"
@@ -550,13 +560,18 @@ function tile(r) {
                    armed === r.pid + ':compact' ? '/compact?' : 'compact'}</button>
                  <button class=kill title="send SIGTERM to pid ${r.pid}">kill</button>` : ''}</div>
     <div class=sub>${state}${r.alive ? ` · <span class=kind title="${esc(kindWhy(r))}">${
-      esc(kindOf(r))}</span>` : ''} · pid ${r.pid}${
+      esc(kindOf(r))}</span>` : ''}${r.job
+        ? ` · <span class=kind title="a background job, not a terminal session. claude attach ${
+            esc(r.job)}">bg job ${esc(r.job)}</span>`
+        : ` · pid ${r.pid}`}${
       r.startedAt ? ` · up ${ago(r.startedAt)}` : ''}${
       u?.lastAt ? ` · active ${ago(u.lastAt)} ago` : ''}</div>
     <div class=sub>${esc((u?.model || r.version || '').replace('claude-', ''))}${
       u?.effort ? ` · ${esc(u.effort)}` : ''}${
       oldCfg ? ` <span class=old title="from the last assistant reply — there has been newer activity since, so a change you just made will not show until this session next replies">as of ${ago(u.modelAt)} ago</span>` : ''}${
       u?.branch && u.branch !== 'HEAD' ? ` · ⑂ ${esc(u.branch)}` : ''}</div>
+    ${r.needs ? `<div class=what><div class=ask><span class=lead>blocked on</span> ${
+      esc(r.needs)}</div></div>` : ''}
     ${what(u, state)}
     ${u ? `
     <div class=ctx>
@@ -568,7 +583,7 @@ function tile(r) {
       ${row('burning (5m)', k(u.burn))}
       ${row('<b>all tokens</b>', '<b>' + k(u.total) + '</b>')}
     </dl>
-    <details class=more ${openTiles.has(String(r.pid)) ? 'open' : ''}>
+    <details class=more ${openTiles.has(String(id)) ? 'open' : ''}>
       <summary>breakdown</summary>
       <dl>
         ${row('output', k(u.tok.output))}
@@ -693,8 +708,9 @@ setInterval(renderSpend, 60e3);
 // or a session whose transcript is gone - and is shown one-sided rather than dropped.
 const FEED_MAX = 40, FEED_JOIN = 12e4;   // same join window correlate() uses server-side
 function feedOf(sessions) {
-  const name = new Map(sessions.map(s => [s.pid, s.name]));
-  const cwdOf = new Map(sessions.map(s => [s.pid, s.cwd]));
+  const withPid = sessions.filter(s => s.pid);     // background jobs have none, and would all
+  const name = new Map(withPid.map(s => [s.pid, s.name]));   // collide on a single null key
+  const cwdOf = new Map(withPid.map(s => [s.pid, s.cwd]));
   const byName = new Map();                  // a one-sided message names its recipient, no pid
   for (const s of sessions) if (!byName.has(s.name)) byName.set(s.name, s.cwd);
   const rows = [];
@@ -914,6 +930,11 @@ document.addEventListener('click', async e => {
   }
   if (e.target.closest('details.more')) return;      // expanding is not a focus click
   const el = e.target.closest('.tile'); if (!el) return;
+  if (!el.dataset.pid) {                            // a background job has no terminal to raise
+    const cmd = `claude attach ${el.dataset.job}`;
+    navigator.clipboard?.writeText(cmd).catch(() => {});
+    return toast(`no terminal — copied: ${cmd}`);
+  }
   const r = await (await fetch('/focus?pid=' + el.dataset.pid, { method: 'POST' })).json();
   toast(r.ok ? (r.exact ? `focused ${r.app} · ${r.tty}`
                         : `raised ${r.app} — find ${r.tty} (editor terminals aren't scriptable)`)

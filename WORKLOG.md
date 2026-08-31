@@ -319,6 +319,41 @@ chars → 2488 on click, clamp lifted, still expanded after two ticks and a node
 **Detail worth keeping:** expanding scrolls the sender line back into view. Without it the body
 fills the 24rem log and you lose sight of who sent the thing you are reading.
 
+## 2026-08-31 — Show background jobs, not just processes (`0.6.0`)
+
+**What:** Sessions with no process now appear as tiles, read from `~/.claude/jobs/<id>/state.json`.
+Four were invisible on this machine: 16 real sessions against the 12 the dashboard showed.
+
+**Why:** `scan()` only ever read `~/.claude/sessions/<pid>.json`, and that registry is keyed by
+pid. A background job that isn't currently running has no pid, so it has no entry — it existed,
+held a transcript and hundreds of millions of tokens, and simply never appeared.
+
+**Asked for remote sessions; this is what was reachable.** Cloud and Remote Control sessions are
+real (12 cloud, ~40 Remote Control on this account) but not obtainable locally: nothing on disk
+holds them — a distinctive cloud session title appears nowhere under `~/.claude` or in
+`~/.claude.json` — `daemon/roster.json` is empty with `auth_required`, no CLI command lists them,
+and the only transport is `wss://bridge.claudeusercontent.com`, an undocumented token-authenticated
+websocket. That is the peer-socket decision again, and worse: a remote service this time. Rejected.
+
+**Rejected also:** shelling out to `claude agents --json` on the poll. It returns exactly the same
+sessions, but it spawns a 197 MB binary every 2 seconds when the underlying state is a small JSON
+file we can read directly.
+
+**Job state carries more than the registry does:** `name`, `cwd`, `createdAt`, `sessionId`, and a
+`needs` field saying what the job is waiting on. That last one is now on the tile as *blocked on*,
+which is the whole point — one of these had been sitting on "confirm: build nudge + separate
+once-per-conversation budgets" for 15 days.
+
+**Everything keyed on pid needed a second key.** Tiles, the open-breakdown set, and the feed's
+name/cwd maps all assumed a pid exists. `data-job` carries the short id instead, the breakdown set
+keys on `job:<id>`, clicking copies `claude attach <id>` rather than POSTing `/focus?pid=null`, and
+the feed's maps now filter out pid-less sessions — four `null` keys would otherwise collide into
+one. Verified none of it regressed: 16 tiles, 0 `pid null` in the DOM, kill/compact/talk absent on
+job tiles, one job's breakdown stayed open across two ticks while the other three stayed shut.
+
+**Note:** a job is `blocked`, not `stale` — it has its own colour. Stale means the process died;
+these are parked and resumable, which is a different thing to tell someone.
+
 ---
 
 ## Standing notes for whoever works here next

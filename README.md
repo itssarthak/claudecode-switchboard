@@ -87,6 +87,12 @@ sorted by tokens burned.
   fetches the whole message body** on demand — it is deliberately not in the 2s payload. Messages you send from the composer don't appear — `/talk` types into the
   terminal, so they arrive as ordinary typed prompts.
 
+- **Background jobs appear too.** A `claude --bg` job that isn't running has no process, so it
+  never lands in the session registry and used to be invisible here. Its state comes from
+  `~/.claude/jobs/<id>/state.json` — the same files `claude agents` reads — including **what it is
+  blocked on**. Clicking one copies `claude attach <id>`, since there is no terminal to raise.
+  Finished jobs are skipped, matching `claude agents` without `--all`.
+
 ## Requirements
 
 - **macOS.** Terminal focus and `/compact` use AppleScript, plan usage reads the

@@ -258,10 +258,33 @@ function ttyMap() {
   return m;
 }
 
+// A background job has no process, so it never gets a ~/.claude/sessions/<pid>.json entry and
+// was invisible here. Its state lives in ~/.claude/jobs/<id>/state.json instead - the same files
+// `claude agents` reads. Finished ones are skipped, which is what `claude agents` hides without
+// --all. These are resumable, not dead: `claude attach <id>` opens one in a terminal.
+const JOBS = path.join(HOME, '.claude', 'jobs');
+const JOB_OVER = new Set(['done', 'stopped', 'failed', 'cancelled']);
+function jobs() {
+  if (!fs.existsSync(JOBS)) return [];
+  const out = [];
+  for (const d of fs.readdirSync(JOBS)) {
+    try {
+      const j = JSON.parse(fs.readFileSync(path.join(JOBS, d, 'state.json'), 'utf8'));
+      if (!j.sessionId || JOB_OVER.has(j.state)) continue;
+      out.push({ job: j.daemonShort || d, sessionId: j.sessionId, name: j.name || null,
+                 cwd: j.cwd || null, status: j.state || 'unknown',
+                 detail: j.detail || j.intent || null, needs: j.needs || null,
+                 startedAt: Date.parse(j.createdAt) || 0,
+                 statusUpdatedAt: Date.parse(j.updatedAt) || 0 });
+    } catch {}                                       // a half-written state.json is not fatal
+  }
+  return out;
+}
+
 const scan = () => {
   if (!fs.existsSync(SESSIONS)) return [];
   const ttys = ttyMap();
-  return fs.readdirSync(SESSIONS).filter(f => f.endsWith('.json')).map(f => {
+  const list = fs.readdirSync(SESSIONS).filter(f => f.endsWith('.json')).map(f => {
     try {
       const s = JSON.parse(fs.readFileSync(path.join(SESSIONS, f), 'utf8'));
       const t = transcriptOf(s.sessionId);
@@ -269,7 +292,15 @@ const scan = () => {
       return { ...s, alive: alive(s.pid), tty, headless: !/^ttys?\d+$/.test(tty || ''),
                usage: t ? usage(t) : null };
     } catch { return null }
-  }).filter(Boolean).sort((a, b) => (b.alive - a.alive) || (b.startedAt - a.startedAt));
+  }).filter(Boolean);
+  const seen = new Set(list.map(x => x.sessionId));
+  for (const j of jobs()) {
+    if (seen.has(j.sessionId)) continue;             // already running with a pid of its own
+    const t = transcriptOf(j.sessionId);
+    list.push({ ...j, pid: null, kind: 'bg', alive: false, tty: null, headless: true,
+                usage: t ? usage(t) : null });
+  }
+  return list.sort((a, b) => (b.alive - a.alive) || (b.startedAt - a.startedAt));
 };
 
 // --- self-check: incremental parse must equal a one-shot parse, and repeat polls must not drift
