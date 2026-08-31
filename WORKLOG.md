@@ -290,6 +290,35 @@ still at 120px, and the other panels untouched.
 **Also:** the per-project cap is 40 rows; the merge no longer caps globally, or a busy project
 would starve a quiet one of its history.
 
+## 2026-08-31 — Read the full message behind a summary (`0.5.5`)
+
+**What:** A `full` toggle on every chatter row, and a `GET /message?pid=&at=&to=` behind it.
+
+**Why:** Rows show the one-line summary the sending agent wrote in its own `SendMessage` call.
+The actual message body was nowhere in the payload — the closest thing was a 700-char clip, and
+the summaries are a median ~56 chars, so most of what one agent told another was unreadable.
+
+**Why an endpoint and not the payload:** `/api` is already 232 KB every 2 seconds. Full bodies
+run to thousands of characters each, 20 per session — tens of KB per session per poll for text
+nobody is reading. So `ingest()` keeps the whole body in memory (capped at 20 KB, last 20 per
+session), `full` is stripped from the `/api` response the same way `thread` is, and it is served
+only when someone clicks.
+
+**Finding the right message:** a row's timestamp is the *receiver's*, but the body lives in the
+*sender's* transcript, so the lookup matches within the same 120s window the two halves are
+already joined on, preferring an entry addressed to a recipient the row names. Measured skew on a
+real pair: **26.9s** — comfortably inside the window, and the reason it isn't tighter.
+
+**Verified:** Against live data — a real message came back at 2499 chars against its 698-char
+preview, and the same text was confirmed absent from the `/api` payload. Receiver-side lookup
+returned 5596 chars across a 26.9s skew. Failure paths return a sentence, not a stack: dead pid,
+timestamp with nothing near it, and non-numeric junk all answer `{ok:false}`. In the browser: 44
+chars → 2488 on click, clamp lifted, still expanded after two ticks and a node replacement,
+`less` restores the summary, and reopening is served from cache without a refetch.
+
+**Detail worth keeping:** expanding scrolls the sender line back into view. Without it the body
+fills the 24rem log and you lose sight of who sent the thing you are reading.
+
 ---
 
 ## Standing notes for whoever works here next

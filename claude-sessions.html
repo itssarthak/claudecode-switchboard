@@ -192,6 +192,11 @@
   .chat .who .arr { color: var(--dim); margin: 0 .3rem }
   .chat .t { color: var(--dim); font-size: .7rem; margin-left: .35rem }
   .chat .blind { color: var(--dim); font-weight: 400 }
+  .chat .mfull { font: inherit; font-size: .7rem; cursor: pointer; margin-left: .4rem;
+                 border: 1px solid var(--line); border-radius: .3rem; padding: 0 .3rem;
+                 background: transparent; color: var(--dim) }
+  .chat .mfull:hover { color: inherit; border-color: color-mix(in srgb, currentColor 40%, transparent) }
+  .chat .body.open { max-height: none }
   /* the message itself stays at full contrast - only the timestamp and the arrow are dim */
   .chat .body { font-size: .82rem; max-height: 5.4rem; overflow: hidden; margin-top: .1rem;
                 overflow-wrap: anywhere }   /* a bare url in a narrow column would push the tiles */
@@ -736,20 +741,49 @@ document.addEventListener('scroll', e => {
   if (log) chatScroll.set(log.parentElement.dataset.cwd, log.scrollTop);
 }, true);
 
+// The row shows the summary the sender wrote. /message fetches the body behind it on demand -
+// it is not in the 2s payload. Both the toggle and the fetched text live out here, because
+// #groups is rebuilt from scratch every tick.
+const fullOpen = new Set(), fullText = new Map();
+document.addEventListener('click', async e => {
+  const b = e.target.closest?.('.mfull');
+  if (!b) return;
+  e.stopPropagation();
+  const key = b.dataset.key;
+  if (fullOpen.has(key)) { fullOpen.delete(key); return tick() }
+  fullOpen.add(key);
+  if (!fullText.has(key)) {
+    b.textContent = '…';
+    const [pid, at] = key.split(':');
+    let r;
+    try { r = await (await fetch(`/message?pid=${pid}&at=${at}&to=${encodeURIComponent(b.dataset.to)}`)).json() }
+    catch { r = null }
+    fullText.set(key, r?.ok ? r.text : `_${r?.error || 'could not read that message'}_`);
+  }
+  await tick();                              // the row is a new node now - find it again
+  document.querySelector(`.mfull[data-key="${CSS.escape(key)}"]`)
+    ?.closest('.m')?.scrollIntoView({ block: 'nearest' });   // keep the sender line in view
+});
+
 function chatterFor(cwd, feed) {
   const rows = feed.filter(r => r.cwds.includes(cwd)).slice(0, FEED_MAX);
   if (!rows.length) return '';
   const hour = rows.filter(r => Date.now() - r.at < 36e5).length;
   return `<details class=chat data-cwd="${esc(cwd)}"${shutChat.has(cwd) ? '' : ' open'}>
     <summary>chatter <small>${rows.length}${hour ? ` · ${hour} this hour` : ''}</small></summary>
-    <div class=log>${rows.map(r => `
-      <div class=m>
+    <div class=log>${rows.map(r => {
+      const key = `${r.fromPid}:${r.at}`, open = fullOpen.has(key);
+      return `<div class=m>
         <div class=who><b class=f>${esc(r.from)}</b><span class=arr>&rarr;</span><b class=r>${esc(
           r.tos.slice(0, 3).join(', ') + (r.tos.length > 3 ? ` +${r.tos.length - 3}` : ''))}</b>
           <span class=t title="${esc(new Date(r.at).toLocaleString())}">${ago(r.at)}</span>${
-          r.blind ? '<span class=blind> &middot; not seen arriving</span>' : ''}</div>
-        <div class=body>${md(r.text)}</div>
-      </div>`).join('')}</div>
+          r.blind ? '<span class=blind> &middot; not seen arriving</span>' : ''}
+          <button class=mfull data-key="${key}" data-to="${esc(r.tos[0] || '')}"
+                  title="${open ? 'back to the summary' : 'read the whole message'}">${
+                  open ? 'less' : 'full'}</button></div>
+        <div class="body${open ? ' open' : ''}">${md(open ? fullText.get(key) ?? '…' : r.text)}</div>
+      </div>`;
+    }).join('')}</div>
   </details>`;
 }
 

@@ -39,7 +39,7 @@ const blank = () => ({
   msgs: 0, turns: 0, tools: 0, byTool: {}, sidechain: 0, ctx: 0, daily: {},
   model: null, effort: null, branch: null, lastAt: 0, modelAt: 0,
   summary: null, lastUser: null, lastAssistant: null, lastTool: null, lastToolAt: 0,
-  inbox: [], outbox: [], pat: {}, thread: [],
+  inbox: [], outbox: [], pat: {}, thread: [], full: [],
 });
 
 function usage(file) {
@@ -57,12 +57,12 @@ function usage(file) {
   const now = Date.now();
   st.recent = st.recent.filter(r => now - r.ts < BURN_WINDOW);
   const burn = st.recent.reduce((n, r) => n + r.out, 0);
-  const { off, buf, ids, recent, thread, ...out } = st;
+  const { off, buf, ids, recent, thread, full, ...out } = st;
   return { ...out, total: Object.values(st.tok).reduce((a, b) => a + b, 0) - st.tok.thinking, burn };
 }
 
 // injected pseudo-user turns: tool results, <system-reminder>, observer/cross-session relays
-const THREAD_TURNS = 24, THREAD_CHARS = 1500;
+const THREAD_TURNS = 24, THREAD_CHARS = 1500, MSG_MAX = 20000;
 const NOISE = /^(<|\[MESSAGE FROM NON-USER|Another Claude session sent|Caveat: The messages below|This session is being continued|Continue from where you left off)/;
 // receiver side of a session->session message: the socket path carries the sender's pid
 const XSESS = /<cross-session-message from="uds:[^"]*?\/(\d+)\.sock"(?:[^>]*?from-name="([^"]*)")?[^>]*>\s*([\s\S]{0,1200})/;
@@ -108,6 +108,11 @@ function ingest(st, e) {
       st.outbox.push({ at: ts, to: p.input?.to ?? null, summary: p.input?.summary || null,
                        preview: clip(p.input?.message) });
       st.outbox.splice(0, st.outbox.length - 20);
+      // the whole message, kept in memory and served only when someone asks for it - putting
+      // it in the 2s payload would be tens of KB per session that nobody is reading
+      st.full.push({ at: ts, to: p.input?.to ?? null,
+                     text: String(p.input?.message ?? '').slice(0, MSG_MAX) });
+      st.full.splice(0, st.full.length - 20);
     }
   }
   if (!e.isSidechain) {
@@ -223,6 +228,25 @@ function threadOf(pid) {
 // `kind` records how a session was launched and is never rewritten, so an attached bg
 // session still says "bg" and a parked interactive one still says "interactive". The tty is
 // the honest signal: no tty means nothing can be typed into it. One ps for the whole scan.
+// The panel shows the one-line summary the sender wrote; this returns the message body behind
+// it. Sender pid plus a timestamp identifies it - the receiver logs the message a beat after the
+// sender does, so match on the same 120s window the two halves are joined on, preferring an
+// entry addressed to one of the recipients the row already names.
+function messageOf(pid, at, to) {
+  const s = scan().find(x => x.pid === pid);
+  if (!s) return { ok: false, error: 'that session is no longer on this machine' };
+  const t = transcriptOf(s.sessionId);
+  if (!t) return { ok: false, error: 'no transcript for that session' };
+  usage(t);
+  const all = parsed.get(t)?.full || [];
+  const near = all.filter(m => Math.abs(m.at - at) < 12e4);
+  if (!near.length) return { ok: false, error: 'the full message is no longer in memory' };
+  const named = to ? near.filter(m => m.to === to) : [];
+  const pick = (named.length ? named : near)
+    .reduce((best, m) => Math.abs(m.at - at) < Math.abs(best.at - at) ? m : best);
+  return { ok: true, at: pick.at, to: pick.to, text: pick.text };
+}
+
 function ttyMap() {
   const m = new Map();
   try {
@@ -826,6 +850,10 @@ const server = http.createServer((req, res) => {
   } else if (threadPid) {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify(threadOf(Number(threadPid[1]))));
+  } else if (req.url.startsWith('/message?')) {
+    const q = new URL(req.url, 'http://localhost').searchParams;
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+    res.end(JSON.stringify(messageOf(Number(q.get('pid')), Number(q.get('at')), q.get('to'))));
   } else if (req.url === '/patterns') {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify(habits(), null, 1));

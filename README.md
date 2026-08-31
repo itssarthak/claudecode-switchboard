@@ -83,7 +83,8 @@ sorted by tokens burned.
   panel carries only messages its own project's agents took part in, so a message between two
   projects appears in both. A message sent to several sessions at once is one row with the
   recipients collected onto it, and one sent somewhere with no visible transcript is marked
-  *not seen arriving*. Messages you send from the composer don't appear — `/talk` types into the
+  *not seen arriving*. Each row shows the one-line summary the sending agent wrote; **`full`
+  fetches the whole message body** on demand — it is deliberately not in the 2s payload. Messages you send from the composer don't appear — `/talk` types into the
   terminal, so they arrive as ordinary typed prompts.
 
 ## Requirements
@@ -265,9 +266,9 @@ slow tool, so the badge says `stalled` rather than claiming to know which.
 
 **This dashboard exposes the text of your prompts.** Tiles show the last user message and
 last assistant reply for every session, `/thread` serves the last 24 turns of any session in
-full, and `/api` additionally carries the summaries and first ~700 characters of messages
-sessions send each other. That is real conversation content,
-not just counters. Treat the port like your terminal.
+full, `/api` additionally carries the summaries and first ~700 characters of messages sessions
+send each other, and `/message` serves one of those messages in full. That is real conversation
+content, not just counters. Treat the port like your terminal.
 
 - It binds to **loopback only**. Setting `HOST=0.0.0.0` publishes your prompts, working
   directories and session names to everyone on your network, with no authentication of
@@ -343,6 +344,7 @@ rules.
 | `POST /send?pid=&cmd=` | Run an allowlisted slash command. |
 | `POST /talk?pid=` | Type the request body into that session's prompt. |
 | `GET /thread?pid=` | The last 24 turns of that session, for the composer. |
+| `GET /message?pid=&at=&to=` | The full body behind one chatter summary. |
 | `POST /kill?pid=` | SIGTERM that session. |
 
 ## License
