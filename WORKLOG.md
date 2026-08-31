@@ -264,6 +264,32 @@ generally: they now fold into the real recipient's row.
 the terminal, so they land in the transcript as ordinary typed prompts with nothing marking them as
 having come from here.
 
+## 2026-08-31 — Chatter moved beside each project (`0.5.1`)
+
+**What:** The one global feed became one collapsible panel per project, sitting to the right of
+that project's tiles and carrying only messages its own agents took part in.
+
+**Why:** Asked for. A single list mixed four projects' conversations into one stream, so the
+`astro` agents' back-and-forth was interleaved with `jobHunt`'s and neither read as a thread.
+
+**How the scoping works:** each row carries the cwds of both ends — the sender's resolved from
+its pid, the recipients' from theirs (or by name, for a one-sided row). A panel takes every row
+with one end in its project, so a message *between* two projects shows in both. Nothing is
+dropped: every row has at least one end in a scanned session. A project with no traffic gets no
+panel and its tiles take the full width.
+
+**Verified:** Rendered it — three panels (astro 40, jobHunt 40, observer-sessions 1), the fourth
+project correctly panel-less, each panel to the right of its own grid, 0 console errors.
+
+**The 2s trap, third time:** `#groups` is rebuilt every tick, so a `<details>` collapsed by the
+user re-opens itself and any scroll inside resets. Both now live outside the DOM — a `Set` of
+collapsed cwds and a `Map` of scroll offsets, restored after each render. Tested by collapsing one
+panel and scrolling another, then waiting two full ticks: node replaced, still collapsed, scroll
+still at 120px, and the other panels untouched.
+
+**Also:** the per-project cap is 40 rows; the merge no longer caps globally, or a busy project
+would starve a quiet one of its history.
+
 ---
 
 ## Standing notes for whoever works here next

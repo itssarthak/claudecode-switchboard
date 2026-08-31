@@ -164,24 +164,33 @@
                  border-bottom-left-radius: .55rem; border-bottom-right-radius: .55rem }
   @media (prefers-reduced-motion: reduce) { .note { display: none } }
 
-  #spend, #habits, #chatter { margin-top: 2.2rem; border-top: 1px solid var(--line); padding-top: 1rem }
-  #spend > summary, #habits > summary, #chatter > summary { cursor: pointer; font-weight: 700; list-style: none; margin-bottom: .3rem }
-  #spend > summary::-webkit-details-marker, #habits > summary::-webkit-details-marker, #chatter > summary::-webkit-details-marker { display: none }
-  #spend > summary::before, #habits > summary::before, #chatter > summary::before { content: '▸ '; display: inline-block; transition: transform .15s }
-  #spend[open] > summary::before, #habits[open] > summary::before, #chatter[open] > summary::before { transform: rotate(90deg) }
-  #spend > summary small, #habits > summary small, #chatter > summary small { font-weight: 400; color: var(--dim); font-size: .8rem; margin-left: .5rem }
-  #chatter .log { display: flex; flex-direction: column; gap: .7rem; margin-top: .8rem;
-                  max-height: 28rem; overflow-y: auto; padding-right: .4rem }
-  #chatter .m { display: grid; grid-template-columns: 3.4rem 1fr; gap: .7rem }
-  #chatter .t { color: var(--dim); font-size: .74rem; text-align: right; padding-top: .15rem }
-  #chatter .who { font-size: .78rem; margin-bottom: .1rem }
-  #chatter .who .arr { color: var(--dim); margin: 0 .35rem }
-  #chatter .who .blind { color: var(--dim); font-weight: 400 }
+  #spend, #habits { margin-top: 2.2rem; border-top: 1px solid var(--line); padding-top: 1rem }
+  #spend > summary, #habits > summary { cursor: pointer; font-weight: 700; list-style: none; margin-bottom: .3rem }
+  #spend > summary::-webkit-details-marker, #habits > summary::-webkit-details-marker { display: none }
+  #spend > summary::before, #habits > summary::before { content: '▸ '; display: inline-block; transition: transform .15s }
+  #spend[open] > summary::before, #habits[open] > summary::before { transform: rotate(90deg) }
+  #spend > summary small, #habits > summary small { font-weight: 400; color: var(--dim); font-size: .8rem; margin-left: .5rem }
+  /* the panel sits beside its project's tiles, so it scopes to the agents in that project */
+  .gwrap { display: grid; grid-template-columns: minmax(0, 1fr) 22rem; gap: 1rem; align-items: start }
+  .gwrap.solo { grid-template-columns: 1fr }
+  @media (max-width: 1180px) { .gwrap { grid-template-columns: 1fr } }
+  .chat { border: 1px solid var(--line); border-radius: .6rem; padding: .55rem .7rem }
+  .chat > summary { cursor: pointer; list-style: none; font-size: .78rem; font-weight: 600 }
+  .chat > summary::-webkit-details-marker { display: none }
+  .chat > summary::before { content: '▸ '; display: inline-block; transition: transform .15s }
+  .chat[open] > summary::before { transform: rotate(90deg) }
+  .chat > summary small { font-weight: 400; color: var(--dim); margin-left: .35rem }
+  .chat .log { display: flex; flex-direction: column; gap: .6rem;
+               margin-top: .6rem; max-height: 24rem; overflow-y: auto }
+  .chat .who { font-size: .74rem; line-height: 1.4 }
+  .chat .who .arr { color: var(--dim); margin: 0 .3rem }
+  .chat .t { color: var(--dim); font-size: .7rem; margin-left: .35rem }
+  .chat .blind { color: var(--dim); font-weight: 400 }
   /* the message itself stays at full contrast - only the timestamp and the arrow are dim */
-  #chatter .body { font-size: .82rem; max-height: 5rem; overflow: hidden }
-  #chatter .body p { margin: 0 0 .3rem }
-  #chatter .body pre { margin: .2rem 0; white-space: pre-wrap }
-  #chatter .empty { color: var(--dim); font-size: .82rem; margin-top: .6rem }
+  .chat .body { font-size: .78rem; max-height: 4.6rem; overflow: hidden; margin-top: .1rem;
+                overflow-wrap: anywhere }   /* a bare url in a 22rem column would push the tiles */
+  .chat .body p { margin: 0 0 .25rem }
+  .chat .body pre { margin: .2rem 0; white-space: pre-wrap }
   .hgrid { display: grid; gap: 1.4rem 2.4rem; margin-top: .8rem;
            grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)) }
   .hgrid h3 { font-size: .78rem; margin: 0 0 .5rem; color: var(--dim); font-weight: 600 }
@@ -257,7 +266,6 @@
 <div class=legend id=legend></div>
 </header>
 <div id=groups></div>
-<details id=chatter open><summary>Session chatter <small></small></summary><div class=log></div></details>
 <details id=spend open><summary>Tokens spent <small></small></summary><div class=hgrid></div></details>
 <details id=habits open><summary>How you use Claude Code <small></small></summary><div class=hgrid></div></details>
 <div id=talk>
@@ -672,19 +680,24 @@ setInterval(renderSpend, 60e3);
 // canonical because it resolves BOTH ends to a pid, so each outbox entry is joined onto one
 // inbox row. Whatever is left unjoined went somewhere this dashboard cannot see - a subagent,
 // or a session whose transcript is gone - and is shown one-sided rather than dropped.
-const FEED_MAX = 60, FEED_JOIN = 12e4;   // same join window correlate() uses server-side
+const FEED_MAX = 40, FEED_JOIN = 12e4;   // same join window correlate() uses server-side
 function feedOf(sessions) {
   const name = new Map(sessions.map(s => [s.pid, s.name]));
+  const cwdOf = new Map(sessions.map(s => [s.pid, s.cwd]));
+  const byName = new Map();                  // a one-sided message names its recipient, no pid
+  for (const s of sessions) if (!byName.has(s.name)) byName.set(s.name, s.cwd);
   const rows = [];
   for (const s of sessions) for (const m of s.usage?.inbox || [])
     rows.push({ at: m.at, fromPid: m.from, from: name.get(m.from) || m.name || `pid ${m.from}`,
-                to: s.name, text: m.text || m.body || '' });
+                to: s.name, text: m.text || m.body || '',
+                cwds: [cwdOf.get(m.from), s.cwd].filter(Boolean) });
   const used = new Set();
   for (const s of sessions) for (const o of s.usage?.outbox || []) {
     const hit = rows.find(r => !used.has(r) && r.fromPid === s.pid && Math.abs(r.at - o.at) < FEED_JOIN);
     if (hit) { used.add(hit); if (!hit.text) hit.text = o.summary || o.preview || '' }
     else rows.push({ at: o.at, fromPid: s.pid, from: s.name, to: o.to || 'unknown',
-                     text: o.summary || o.preview || '', blind: true });
+                     text: o.summary || o.preview || '', blind: true,
+                     cwds: [s.cwd, byName.get(o.to)].filter(Boolean) });
   }
   // One message to four sessions is four rows, and two sessions sharing a name produce a
   // near-duplicate pair. Same sender, same text, close in time = one message; collect the
@@ -693,33 +706,45 @@ function feedOf(sessions) {
   for (const r of rows.sort((a, b) => b.at - a.at)) {
     const prev = r.text && merged.find(m => m.from === r.from && m.text === r.text
                                             && Math.abs(m.at - r.at) < FEED_JOIN);
-    if (!prev) merged.push({ ...r, tos: [r.to] });
-    else { if (!prev.tos.includes(r.to)) prev.tos.push(r.to); prev.blind = prev.blind && r.blind }
+    if (!prev) merged.push({ ...r, tos: [r.to], cwds: [...new Set(r.cwds)] });
+    else {
+      if (!prev.tos.includes(r.to)) prev.tos.push(r.to);
+      for (const c of r.cwds) if (!prev.cwds.includes(c)) prev.cwds.push(c);
+      prev.blind = prev.blind && r.blind;
+    }
   }
-  return merged.slice(0, FEED_MAX);
+  return merged;                             // capped per project, not globally
 }
 
-let feedKey = '';
-function renderFeed(sessions) {
-  const rows = feedOf(sessions), box = document.getElementById('chatter');
-  const key = `${rows.length}:${rows[0]?.at || 0}`;
-  if (key === feedKey) return;              // rebuilding every 2s would eat text selection
-  feedKey = key;
+// A project's panel carries every message with one end in that project, so a message across
+// two projects shows up in both - each side is chatter its own agents took part in.
+const shutChat = new Set();                  // cwds the user collapsed; #groups is rebuilt every
+const chatScroll = new Map();                // 2s, so neither survives in the DOM
+document.addEventListener('toggle', e => {
+  if (!e.target.matches?.('details.chat')) return;
+  const cwd = e.target.dataset.cwd;
+  e.target.open ? shutChat.delete(cwd) : shutChat.add(cwd);
+}, true);
+document.addEventListener('scroll', e => {
+  const log = e.target.closest?.('.chat .log');
+  if (log) chatScroll.set(log.parentElement.dataset.cwd, log.scrollTop);
+}, true);
+
+function chatterFor(cwd, feed) {
+  const rows = feed.filter(r => r.cwds.includes(cwd)).slice(0, FEED_MAX);
+  if (!rows.length) return '';
   const hour = rows.filter(r => Date.now() - r.at < 36e5).length;
-  box.querySelector('small').textContent = rows.length
-    ? `${rows.length} message${rows.length > 1 ? 's' : ''}${hour ? ` · ${hour} in the last hour` : ''}`
-    : '';
-  box.querySelector('.log').innerHTML = rows.length ? rows.map(r => `
-    <div class=m>
-      <div class=t title="${esc(new Date(r.at).toLocaleString())}">${ago(r.at)}</div>
-      <div>
+  return `<details class=chat data-cwd="${esc(cwd)}"${shutChat.has(cwd) ? '' : ' open'}>
+    <summary>chatter <small>${rows.length}${hour ? ` · ${hour} this hour` : ''}</small></summary>
+    <div class=log>${rows.map(r => `
+      <div class=m>
         <div class=who><b>${esc(r.from)}</b><span class=arr>&rarr;</span><b>${esc(
-          r.tos.slice(0, 3).join(', ') + (r.tos.length > 3 ? ` +${r.tos.length - 3}` : ''))}</b>${
+          r.tos.slice(0, 3).join(', ') + (r.tos.length > 3 ? ` +${r.tos.length - 3}` : ''))}</b>
+          <span class=t title="${esc(new Date(r.at).toLocaleString())}">${ago(r.at)}</span>${
           r.blind ? '<span class=blind> &middot; not seen arriving</span>' : ''}</div>
         <div class=body>${md(r.text)}</div>
-      </div>
-    </div>`).join('')
-    : '<div class=empty>Nothing yet. This fills in when one session messages another.</div>';
+      </div>`).join('')}</div>
+  </details>`;
 }
 
 async function tick() {
@@ -752,11 +777,18 @@ async function tick() {
   const spent = rs => rs.reduce((n, r) => n + tokens(r), 0);
   for (const rs of by.values()) rs.sort((a, b) => (b.alive - a.alive) || tokens(b) - tokens(a));
   const groups = [...by.entries()].sort((a, b) => spent(b[1]) - spent(a[1]));
-  document.getElementById('groups').innerHTML = groups.map(([cwd, rs]) =>
-    `<h2>${esc(label(cwd))} <small>${esc(tilde(cwd))}</small>
+  const feed = feedOf(sessions);
+  document.getElementById('groups').innerHTML = groups.map(([cwd, rs]) => {
+    const chat = chatterFor(cwd, feed);
+    return `<h2>${esc(label(cwd))} <small>${esc(tilde(cwd))}</small>
       <small>${rs.length} session${rs.length > 1 ? 's' : ''} · ${k(spent(rs))} tokens</small></h2>
-     <div class=grid>${rs.map(tile).join('')}</div>`).join('');
-  renderFeed(sessions);
+     <div class="gwrap${chat ? '' : ' solo'}">
+       <div class=grid>${rs.map(tile).join('')}</div>${chat}</div>`;
+  }).join('');
+  for (const [cwd, top] of chatScroll) {      // innerHTML just reset every one of these
+    const log = document.querySelector(`.chat[data-cwd="${CSS.escape(cwd)}"] .log`);
+    if (log) log.scrollTop = top;
+  }
   flights(sessions);
   document.documentElement.style.setProperty('--toph',
     document.getElementById('top').offsetHeight + 'px');
