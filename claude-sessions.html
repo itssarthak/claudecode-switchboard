@@ -18,6 +18,9 @@
   .stat { border: 1px solid var(--line); border-radius: .5rem; padding: .5rem .85rem; min-width: 8.5rem }
   .stat b { display: block; font-size: 1.15rem; font-weight: 600; letter-spacing: -.01em }
   .stat span { font-size: .74rem; color: var(--dim) }
+  /* today measured against the daily target. Scoped to .stat - a bare .hot/.warn would collide
+     with the quota bands, which is exactly how the .q bug happened. */
+  .stat b.ok { color: #4c9a5a } .stat b.warn { color: #d99a45 } .stat b.hot { color: #c9584f }
   .stat i { display: block; font-style: normal; font-size: .7rem; color: var(--dim);
             margin-top: .15rem; opacity: .85 }
 
@@ -815,6 +818,11 @@ async function tick() {
   const sum = f => sessions.reduce((n, s) => n + (s.usage ? f(s.usage) : 0), 0);
 
   const sug = budget?.week?.suggestedRatePerDay || 0;   // the daily budget today is measured against
+  const allToday = (today.input || 0) + (today.output || 0) + (today.cacheWrite || 0) + (today.cacheRead || 0);
+  // today against the rate that would land exactly on the reset. Over it means today is spending
+  // faster than what is left can sustain - not that the week is lost, which is what the strip says.
+  const todayPct = sug ? Math.round(allToday / sug * 100) : null;
+  const todayCls = todayPct == null ? '' : todayPct >= 100 ? 'hot' : todayPct >= 80 ? 'warn' : 'ok';
   const wait = sessions.filter(waiting).length, stall = sessions.filter(stalled).length;
   document.getElementById('summary').textContent =
     `— ${sessions.filter(s => s.alive).length} live in ${new Set(sessions.map(s => s.cwd)).size} projects`
@@ -823,15 +831,17 @@ async function tick() {
     [k(sum(u => u.burn)), 'output, last 5 min', 'across every live session'],
     [k(sum(u => u.ctx)), 'held in context', 'sum of every session window'],
     [k(today.output), 'output today', 'account-wide, from transcripts'],
-    [k((today.input || 0) + (today.output || 0) + (today.cacheWrite || 0) + (today.cacheRead || 0)),
-      'all tokens today', `${today.msgs || 0} model replies today`
-        + (sug ? `. The target below is what is left of the week divided by the time left before `
-               + `the reset - spend that per day and the quota runs out exactly as the week does.` : ''),
-      sug ? `target ${k(sug)}/day` : ''],
+    [k(allToday), 'all tokens today',
+      `${today.msgs || 0} model replies today`
+        + (todayPct == null ? '' : `. That is ${todayPct}% of today's target. The target is what is `
+           + `left of the week divided by the time left before the reset - spend that per day and `
+           + `the quota runs out exactly as the week does.`),
+      sug ? `target ${k(sug)}/day` : '', todayCls],
     [rollup.scanning ? `${rollup.done}/${rollup.files}` : String(rollup.sessions),
       rollup.scanning ? 'scanning…' : 'transcripts read',
       rollup.scanning ? 'reading every transcript once' : `updated ${new Date(rollup.at).toLocaleTimeString()}`],
-  ].map(([val, lab, sub, ref]) => `<div class=stat title="${esc(sub)}"><b>${val}</b><span>${lab}</span>${
+  ].map(([val, lab, sub, ref, cls]) => `<div class=stat title="${esc(sub)}"><b${
+      cls ? ` class=${cls}` : ''}>${val}</b><span>${lab}</span>${
       ref ? `<i>${esc(ref)}</i>` : ''}</div>`).join('');
 
   const by = new Map();

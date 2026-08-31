@@ -373,6 +373,11 @@ itself were the problem. It is a goal, not a verdict, so it renders plain.
 `target N/day`, next to the value it judges, and was then removed from the weekly strip — carrying
 it in both places was the same number twice. It stays in `--report`, which has no stat cards.
 
+**Follow-up (`0.6.4`):** today's total is coloured against that target — green under 80%, amber to
+100%, red above. Bands are scoped as `.stat b.hot` and friends: a bare `.hot`/`.warn` would collide
+with the quota bands, which is precisely how the `.q` bug happened. Nothing lives in colour alone —
+both numbers are on the card and the tooltip gives the percentage.
+
 ---
 
 ## Standing notes for whoever works here next
