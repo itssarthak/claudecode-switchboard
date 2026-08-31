@@ -354,6 +354,21 @@ job tiles, one job's breakdown stayed open across two ticks while the other thre
 **Note:** a job is `blocked`, not `stale` — it has its own colour. Stale means the process died;
 these are parked and resumable, which is a different thing to tell someone.
 
+## 2026-08-31 — Suggested run rate (`0.6.1`)
+
+**What:** `suggestedRatePerDay` on the budget strip and in `--report`: what is left divided by the
+time still on the clock. Spend at that rate and the week ends exactly as the quota does.
+
+**Why:** the strip said what you *are* spending and whether you'd run dry, but never what you
+*should* spend. That is the number you act on.
+
+**Verified:** recomputed independently from `tokensRemaining` and `resetsAt` — 435,067,892 against
+435,072,662, the gap being the seconds between the two clock reads.
+
+**Rejected:** colouring it red/green by whether the current rate is above it. It duplicates what
+`projected = N%` and *runs out / to spare* already say, and a red target reads as though the target
+itself were the problem. It is a goal, not a verdict, so it renders plain.
+
 ---
 
 ## Standing notes for whoever works here next

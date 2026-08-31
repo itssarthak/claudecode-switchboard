@@ -58,7 +58,8 @@ sorted by tokens burned.
 - **Live plan usage** — your actual 5-hour and weekly limits as percentages, with reset
   times. See [Plan usage](#plan-usage) for how this works.
 - **Derived weekly budget** — what 100% is *in tokens*, how much is left, your run rate per
-  day, and whether you'll run dry before the reset. See [Weekly budget](#weekly-budget).
+  day, **the rate that would land exactly on the reset**, and whether you'll run dry before it.
+  See [Weekly budget](#weekly-budget).
 
 **Two sections below the tiles**
 - **Tokens spent** — per day for the last 30, and per quota week, from the persistent ledger.
@@ -139,6 +140,7 @@ quota week  21 Aug 1:30pm  ->  28 Aug 1:30pm   (Asia/Calcutta)
   => 100% is 4606.9M tokens
   remaining  1336.0M
   run rate   731.5M/day  ->  5120.8M by reset (111% of implied)
+  to finish  382.1M/day would land exactly on the reset
   hits 100%  27 Aug, 8:38 pm
 ```
 

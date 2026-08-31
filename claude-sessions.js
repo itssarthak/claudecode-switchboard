@@ -360,6 +360,7 @@ if (process.argv[2] === '--patterns') {
     console.log(`  => 100% is ${m(w.impliedFullWeek)} tokens   [derived, see caveat]`);
     console.log(`  remaining  ${m(w.tokensRemaining)}`);
     console.log(`  run rate   ${m(w.runRatePerDay)}/day  ->  ${m(w.projectedFullWeek)} by reset (${w.projectedPercent ?? '—'}% of implied)`);
+    console.log(`  to finish  ${m(w.suggestedRatePerDay)}/day would land exactly on the reset`);
     console.log(`  hits 100%  ${d(w.exhaustedAt)}`);
     console.log(`\n  day          tokens    output   %of week`);
     for (const x of r.days.slice(0, 14))
@@ -730,6 +731,11 @@ function report() {
       impliedFullWeek: implied,
       tokensRemaining: implied && weekUsed != null ? implied - weekUsed : null,
       runRatePerDay: rate ? Math.round(rate) : null,
+      // what is left, spread evenly over the time still on the clock: spend at this rate and the
+      // week ends exactly as the quota does. Above it you run dry early, below it you leave
+      // budget unspent.
+      suggestedRatePerDay: (implied && weekUsed != null && resets && resets > now)
+        ? Math.max(0, Math.round((implied - weekUsed) / ((resets - now) / 864e5))) : null,
       projectedFullWeek: projected,
       projectedPercent: (projected && implied) ? Math.round(projected / implied * 100) : null,
       exhaustedAt: (rate && implied) ? new Date(weekStart + implied / rate * 864e5).toISOString() : null,
