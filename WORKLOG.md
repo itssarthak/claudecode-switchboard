@@ -369,6 +369,10 @@ time still on the clock. Spend at that rate and the week ends exactly as the quo
 `projected = N%` and *runs out / to spare* already say, and a red target reads as though the target
 itself were the problem. It is a goal, not a verdict, so it renders plain.
 
+**Follow-up (`0.6.2`):** the same target now sits under *all tokens today* as `target N/day`, since
+the weekly strip and the daily counter were far enough apart on the page that the comparison had to
+be done from memory. Same number, put next to the thing it judges.
+
 ---
 
 ## Standing notes for whoever works here next

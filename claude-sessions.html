@@ -18,6 +18,8 @@
   .stat { border: 1px solid var(--line); border-radius: .5rem; padding: .5rem .85rem; min-width: 8.5rem }
   .stat b { display: block; font-size: 1.15rem; font-weight: 600; letter-spacing: -.01em }
   .stat span { font-size: .74rem; color: var(--dim) }
+  .stat i { display: block; font-style: normal; font-size: .7rem; color: var(--dim);
+            margin-top: .15rem; opacity: .85 }
 
   .legend { display: flex; flex-wrap: wrap; gap: .5rem 1.4rem; font-size: .8rem;
             padding: 0 0 1.2rem; border-bottom: 1px solid var(--line); margin-bottom: .5rem }
@@ -814,6 +816,7 @@ async function tick() {
   const d0 = new Date(), today = rollup.days[new Date(d0 - d0.getTimezoneOffset() * 6e4).toISOString().slice(0, 10)] || {};
   const sum = f => sessions.reduce((n, s) => n + (s.usage ? f(s.usage) : 0), 0);
 
+  const sug = budget?.week?.suggestedRatePerDay || 0;   // the daily budget today is measured against
   const wait = sessions.filter(waiting).length, stall = sessions.filter(stalled).length;
   document.getElementById('summary').textContent =
     `— ${sessions.filter(s => s.alive).length} live in ${new Set(sessions.map(s => s.cwd)).size} projects`
@@ -823,11 +826,15 @@ async function tick() {
     [k(sum(u => u.ctx)), 'held in context', 'sum of every session window'],
     [k(today.output), 'output today', 'account-wide, from transcripts'],
     [k((today.input || 0) + (today.output || 0) + (today.cacheWrite || 0) + (today.cacheRead || 0)),
-      'all tokens today', `${today.msgs || 0} model replies today`],
+      'all tokens today', `${today.msgs || 0} model replies today`
+        + (sug ? `. The target below is what is left of the week divided by the time left before `
+               + `the reset - spend that per day and the quota runs out exactly as the week does.` : ''),
+      sug ? `target ${k(sug)}/day` : ''],
     [rollup.scanning ? `${rollup.done}/${rollup.files}` : String(rollup.sessions),
       rollup.scanning ? 'scanning…' : 'transcripts read',
       rollup.scanning ? 'reading every transcript once' : `updated ${new Date(rollup.at).toLocaleTimeString()}`],
-  ].map(([val, lab, sub]) => `<div class=stat title="${esc(sub)}"><b>${val}</b><span>${lab}</span></div>`).join('');
+  ].map(([val, lab, sub, ref]) => `<div class=stat title="${esc(sub)}"><b>${val}</b><span>${lab}</span>${
+      ref ? `<i>${esc(ref)}</i>` : ''}</div>`).join('');
 
   const by = new Map();
   for (const r of sessions) { if (!by.has(r.cwd)) by.set(r.cwd, []); by.get(r.cwd).push(r); }
