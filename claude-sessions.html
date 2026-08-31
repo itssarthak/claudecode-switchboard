@@ -164,12 +164,24 @@
                  border-bottom-left-radius: .55rem; border-bottom-right-radius: .55rem }
   @media (prefers-reduced-motion: reduce) { .note { display: none } }
 
-  #spend, #habits { margin-top: 2.2rem; border-top: 1px solid var(--line); padding-top: 1rem }
-  #spend > summary, #habits > summary { cursor: pointer; font-weight: 700; list-style: none; margin-bottom: .3rem }
-  #spend > summary::-webkit-details-marker, #habits > summary::-webkit-details-marker { display: none }
-  #spend > summary::before, #habits > summary::before { content: '▸ '; display: inline-block; transition: transform .15s }
-  #spend[open] > summary::before, #habits[open] > summary::before { transform: rotate(90deg) }
-  #spend > summary small, #habits > summary small { font-weight: 400; color: var(--dim); font-size: .8rem; margin-left: .5rem }
+  #spend, #habits, #chatter { margin-top: 2.2rem; border-top: 1px solid var(--line); padding-top: 1rem }
+  #spend > summary, #habits > summary, #chatter > summary { cursor: pointer; font-weight: 700; list-style: none; margin-bottom: .3rem }
+  #spend > summary::-webkit-details-marker, #habits > summary::-webkit-details-marker, #chatter > summary::-webkit-details-marker { display: none }
+  #spend > summary::before, #habits > summary::before, #chatter > summary::before { content: '▸ '; display: inline-block; transition: transform .15s }
+  #spend[open] > summary::before, #habits[open] > summary::before, #chatter[open] > summary::before { transform: rotate(90deg) }
+  #spend > summary small, #habits > summary small, #chatter > summary small { font-weight: 400; color: var(--dim); font-size: .8rem; margin-left: .5rem }
+  #chatter .log { display: flex; flex-direction: column; gap: .7rem; margin-top: .8rem;
+                  max-height: 28rem; overflow-y: auto; padding-right: .4rem }
+  #chatter .m { display: grid; grid-template-columns: 3.4rem 1fr; gap: .7rem }
+  #chatter .t { color: var(--dim); font-size: .74rem; text-align: right; padding-top: .15rem }
+  #chatter .who { font-size: .78rem; margin-bottom: .1rem }
+  #chatter .who .arr { color: var(--dim); margin: 0 .35rem }
+  #chatter .who .blind { color: var(--dim); font-weight: 400 }
+  /* the message itself stays at full contrast - only the timestamp and the arrow are dim */
+  #chatter .body { font-size: .82rem; max-height: 5rem; overflow: hidden }
+  #chatter .body p { margin: 0 0 .3rem }
+  #chatter .body pre { margin: .2rem 0; white-space: pre-wrap }
+  #chatter .empty { color: var(--dim); font-size: .82rem; margin-top: .6rem }
   .hgrid { display: grid; gap: 1.4rem 2.4rem; margin-top: .8rem;
            grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)) }
   .hgrid h3 { font-size: .78rem; margin: 0 0 .5rem; color: var(--dim); font-weight: 600 }
@@ -245,6 +257,7 @@
 <div class=legend id=legend></div>
 </header>
 <div id=groups></div>
+<details id=chatter open><summary>Session chatter <small></small></summary><div class=log></div></details>
 <details id=spend open><summary>Tokens spent <small></small></summary><div class=hgrid></div></details>
 <details id=habits open><summary>How you use Claude Code <small></small></summary><div class=hgrid></div></details>
 <div id=talk>
@@ -653,6 +666,62 @@ async function renderSpend() {
 renderSpend();
 setInterval(renderSpend, 60e3);
 
+// --- session chatter ---------------------------------------------------------------
+// Every session-to-session message is written twice: the sender logs a SendMessage tool_use
+// (outbox) and the receiver logs a <cross-session-message> (inbox). The receiver's copy is
+// canonical because it resolves BOTH ends to a pid, so each outbox entry is joined onto one
+// inbox row. Whatever is left unjoined went somewhere this dashboard cannot see - a subagent,
+// or a session whose transcript is gone - and is shown one-sided rather than dropped.
+const FEED_MAX = 60, FEED_JOIN = 12e4;   // same join window correlate() uses server-side
+function feedOf(sessions) {
+  const name = new Map(sessions.map(s => [s.pid, s.name]));
+  const rows = [];
+  for (const s of sessions) for (const m of s.usage?.inbox || [])
+    rows.push({ at: m.at, fromPid: m.from, from: name.get(m.from) || m.name || `pid ${m.from}`,
+                to: s.name, text: m.text || m.body || '' });
+  const used = new Set();
+  for (const s of sessions) for (const o of s.usage?.outbox || []) {
+    const hit = rows.find(r => !used.has(r) && r.fromPid === s.pid && Math.abs(r.at - o.at) < FEED_JOIN);
+    if (hit) { used.add(hit); if (!hit.text) hit.text = o.summary || o.preview || '' }
+    else rows.push({ at: o.at, fromPid: s.pid, from: s.name, to: o.to || 'unknown',
+                     text: o.summary || o.preview || '', blind: true });
+  }
+  // One message to four sessions is four rows, and two sessions sharing a name produce a
+  // near-duplicate pair. Same sender, same text, close in time = one message; collect the
+  // recipients onto a single row instead of repeating the body.
+  const merged = [];
+  for (const r of rows.sort((a, b) => b.at - a.at)) {
+    const prev = r.text && merged.find(m => m.from === r.from && m.text === r.text
+                                            && Math.abs(m.at - r.at) < FEED_JOIN);
+    if (!prev) merged.push({ ...r, tos: [r.to] });
+    else { if (!prev.tos.includes(r.to)) prev.tos.push(r.to); prev.blind = prev.blind && r.blind }
+  }
+  return merged.slice(0, FEED_MAX);
+}
+
+let feedKey = '';
+function renderFeed(sessions) {
+  const rows = feedOf(sessions), box = document.getElementById('chatter');
+  const key = `${rows.length}:${rows[0]?.at || 0}`;
+  if (key === feedKey) return;              // rebuilding every 2s would eat text selection
+  feedKey = key;
+  const hour = rows.filter(r => Date.now() - r.at < 36e5).length;
+  box.querySelector('small').textContent = rows.length
+    ? `${rows.length} message${rows.length > 1 ? 's' : ''}${hour ? ` · ${hour} in the last hour` : ''}`
+    : '';
+  box.querySelector('.log').innerHTML = rows.length ? rows.map(r => `
+    <div class=m>
+      <div class=t title="${esc(new Date(r.at).toLocaleString())}">${ago(r.at)}</div>
+      <div>
+        <div class=who><b>${esc(r.from)}</b><span class=arr>&rarr;</span><b>${esc(
+          r.tos.slice(0, 3).join(', ') + (r.tos.length > 3 ? ` +${r.tos.length - 3}` : ''))}</b>${
+          r.blind ? '<span class=blind> &middot; not seen arriving</span>' : ''}</div>
+        <div class=body>${md(r.text)}</div>
+      </div>
+    </div>`).join('')
+    : '<div class=empty>Nothing yet. This fills in when one session messages another.</div>';
+}
+
 async function tick() {
   const { sessions, rollup, quota, budget, idleNotifMs, defaultModel } = await (await fetch('/api')).json();
   if (idleNotifMs > 0) IDLE_MS = idleNotifMs;
@@ -687,6 +756,7 @@ async function tick() {
     `<h2>${esc(label(cwd))} <small>${esc(tilde(cwd))}</small>
       <small>${rs.length} session${rs.length > 1 ? 's' : ''} · ${k(spent(rs))} tokens</small></h2>
      <div class=grid>${rs.map(tile).join('')}</div>`).join('');
+  renderFeed(sessions);
   flights(sessions);
   document.documentElement.style.setProperty('--toph',
     document.getElementById('top').offsetHeight + 'px');

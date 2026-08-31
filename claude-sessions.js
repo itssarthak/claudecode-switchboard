@@ -685,21 +685,6 @@ function report() {
   };
 }
 
-function correlate(sessions) {
-  const out = new Map();
-  for (const s of sessions) if (s.usage?.outbox?.length) out.set(s.pid, s.usage.outbox);
-  for (const s of sessions) for (const m of s.usage?.inbox || []) {
-    let best = null, gap = 12e4;                          // sender/receiver timestamps differ a little
-    for (const o of out.get(m.from) || []) {
-      const g = Math.abs(o.at - m.at);
-      if (g < gap) { gap = g; best = o }
-    }
-    m.summary = best?.summary || null;
-    m.text = best?.summary || m.body || best?.preview || null;
-  }
-  return sessions;
-}
-
 // The receiver's copy has the pid (so we know which two tiles) but not the summary; the
 // sender's SendMessage call has the summary. Join them on sender pid + nearby timestamp.
 function correlate(sessions) {

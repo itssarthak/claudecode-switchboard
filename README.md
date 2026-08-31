@@ -78,6 +78,11 @@ sorted by tokens burned.
   the message summary — the one the sending agent wrote in its own `SendMessage` call, not a
   generated one. It stays up for a computed reading time, pauses while you hover, and has a
   close button.
+- **Session chatter** below the grid keeps that traffic instead of letting it fly past: every
+  session-to-session message as one `from → to` line, newest first. A message sent to several
+  sessions at once is one row with the recipients collected onto it, and one sent somewhere with
+  no visible transcript is marked *not seen arriving*. Messages you send from the composer don't
+  appear — `/talk` types into the terminal, so they arrive as ordinary typed prompts.
 
 ## Requirements
 

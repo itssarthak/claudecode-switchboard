@@ -225,6 +225,45 @@ was the https one.
 **Known gap:** card text is still escaped-only, so `**bold**` shows raw there. Tiles clamp to two
 lines and block elements would break the clamp; an inline-only pass would fix it.
 
+## 2026-08-31 — Session chatter feed (`0.5.0`)
+
+**What:** A "Session chatter" section under the session grid: every session-to-session message
+as one `from → to` line, newest first, 60 deep.
+
+**Why:** The traffic was already parsed into `inbox`/`outbox` and already shipped in `/api` — it
+was only ever shown as a transient fly-across animation, so anything you didn't happen to be
+looking at was lost. The feed is built entirely client-side from the existing payload, so it
+costs zero extra bytes over the wire and no extra file reads.
+
+**Two joins make it read as one conversation:**
+- Every message is written *twice* — the sender logs a `SendMessage` tool_use, the receiver logs
+  a `<cross-session-message>`. The receiver's copy is canonical because it resolves **both** ends
+  to a pid; each outbox entry is then joined onto one inbox row within the same 120s window
+  `correlate()` uses. Unjoined outbox entries went somewhere with no visible transcript, and are
+  shown one-sided as "not seen arriving" rather than dropped.
+- Same sender, same text, within 120s = one message. Without this, a broadcast to four sessions
+  was four identical rows, and two live sessions sharing a name (`Harvey (Chief of Staff)` and
+  `Harvey (Chief of Staff) [6f73e7]`) produced a near-duplicate pair. Recipients now collect onto
+  one row.
+
+**Verified:** Ran the join over a live `/api` capture — 92 inbox rows, 47 outbox entries joined,
+41 genuinely one-sided, **0 rows with empty text**. Rendered in the browser and read it: 60 rows,
+0 console errors, and the message bodies stay at full contrast (only timestamps and the arrow are
+`--dim`) so it does not repeat the washed-out quota bug. Marked a row, waited two full 2s ticks,
+confirmed the same node was still connected — the feed only re-renders when `rows.length` or the
+newest timestamp changes, so text selection survives.
+
+**Rejected:** Building the feed server-side. `/api` is already 232 KB every 2 seconds; a `feed`
+array would have duplicated bytes that are already in the payload. Also rejected filtering out the
+claude-mem observer relays by cwd — plugin-specific and brittle. Merging duplicates handles them
+generally: they now fold into the real recipient's row.
+
+**Also:** deleted a dead duplicate `correlate()`. Two definitions existed; the second silently won.
+
+**Known gap:** messages you send from the dashboard's own composer don't appear. `/talk` types into
+the terminal, so they land in the transcript as ordinary typed prompts with nothing marking them as
+having come from here.
+
 ---
 
 ## Standing notes for whoever works here next
