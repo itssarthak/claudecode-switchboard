@@ -210,6 +210,13 @@ and replaced rather than appended.
 It is the transcript, not a separate log: messages you send in the terminal show up here too.
 Tool calls are not shown, only prose.
 
+Replies are rendered as markdown — bold, italic, inline and fenced code, bullet and numbered
+lists, headings, and links. The renderer is about 30 lines and takes no dependency. It escapes
+first and only ever pattern-matches over already-escaped text, so no tag can be built out of
+message content, and link hrefs are restricted to `http(s)` so a `javascript:` url stays inert
+text. Code spans are lifted out before anything else runs and put back last, so markdown inside
+a snippet stays literal.
+
 This is genuinely "type into my terminal over HTTP", which is why it is a separate endpoint
 from `/send` and why the server binds to loopback only. What guards it:
 

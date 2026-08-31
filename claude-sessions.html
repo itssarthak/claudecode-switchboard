@@ -210,7 +210,18 @@
   #talklog { max-height: min(42vh, 26rem); overflow-y: auto; margin-bottom: .45rem;
             font-size: .8rem; line-height: 1.45; display: flex; flex-direction: column; gap: .5rem }
   #talklog:empty { display: none }
-  #talklog .m { white-space: pre-wrap; overflow-wrap: anywhere }
+  #talklog .m { overflow-wrap: anywhere; white-space: pre-wrap }
+  #talklog .m > :is(h4, ul, ol, pre) { white-space: normal }
+  #talklog h4 { font-size: .82rem; margin: .5rem 0 .2rem; font-weight: 700 }
+  #talklog ul, #talklog ol { margin: .2rem 0; padding-left: 1.2rem }
+  #talklog li { margin: .1rem 0 }
+  #talklog code { font-size: .92em; padding: 0 .25em; border-radius: .2rem;
+                  background: color-mix(in srgb, currentColor 12%, transparent) }
+  #talklog pre { margin: .35rem 0; padding: .4rem .55rem; overflow-x: auto;
+                 border: 1px solid var(--line); border-radius: .35rem;
+                 background: color-mix(in srgb, currentColor 7%, transparent) }
+  #talklog pre code { background: none; padding: 0 }
+  #talklog a { color: #6b8fd4 }
   #talklog .m i { font-style: normal; font-size: .68rem; color: var(--dim);
                  display: block; margin-bottom: .1rem }
   #talklog .user { border-left: 2px solid var(--line); padding-left: .5rem }
@@ -256,6 +267,45 @@ document.getElementById('legend').innerHTML = Object.entries(STATES).map(([k, v]
   + `<span class=key><span>· click any tile to jump to its terminal</span></span>`;
 
 const esc = s => String(s ?? '').replace(/[<&"]/g, c => ({ '<': '&lt;', '&': '&amp;', '"': '&quot;' }[c]));
+
+// Just enough markdown for what Claude actually writes back. Escaping happens FIRST and the
+// patterns only ever run over already-escaped text, so no tag can be constructed from input;
+// link hrefs are additionally restricted to http(s) so a javascript: url cannot get through.
+// Code spans are lifted out before anything else and put back last, so markdown inside a
+// snippet stays literal.
+function md(raw) {
+  const held = [];
+  const hold = h => `\u0000${held.push(h) - 1}\u0000`;
+  let t = esc(raw)
+    .replace(/```[a-z]*\n?([\s\S]*?)```/gi, (_, c) => hold(`<pre><code>${c.replace(/\n+$/, '')}</code></pre>`))
+    .replace(/`([^`\n]+)`/g, (_, c) => hold(`<code>${c}</code>`));
+
+  const inline = l => l
+    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g,
+             (_, txt, href) => `<a href="${href}" target="_blank" rel="noopener noreferrer">${txt}</a>`)
+    .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>')
+    .replace(/(^|[\s(])\*([^*\n]+)\*/g, '$1<i>$2</i>')
+    .replace(/(^|[\s(])_([^_\n]+)_/g, '$1<i>$2</i>');
+
+  const out = [];
+  let list = null;                                   // 'ul' | 'ol' | null
+  const closeList = () => { if (list) { out.push(`</${list}>`); list = null } };
+  for (const line of t.split('\n')) {
+    const head = line.match(/^(#{1,4})\s+(.*)$/);
+    const bullet = line.match(/^\s*[-*+]\s+(.*)$/);
+    const number = line.match(/^\s*\d+[.)]\s+(.*)$/);
+    if (head) { closeList(); out.push(`<h4>${inline(head[2])}</h4>`) }
+    else if (bullet || number) {
+      const want = bullet ? 'ul' : 'ol';
+      if (list !== want) { closeList(); out.push(`<${want}>`); list = want }
+      out.push(`<li>${inline((bullet || number)[1])}</li>`);
+    }
+    else if (!line.trim()) { closeList(); out.push('') }
+    else { closeList(); out.push(inline(line)) }
+  }
+  closeList();
+  return out.join('\n').replace(/\u0000(\d+)\u0000/g, (_, i) => held[+i]);
+}
 const tilde = p => (p || '').replace(/^\/Users\/[^/]+/, '~');
 const label = p => tilde(p).split('/').filter(Boolean).pop() || '~';
 const k = n => !n ? '0' : n < 1e3 ? String(n) : n < 1e6 ? (n / 1e3).toFixed(n < 1e4 ? 1 : 0) + 'k'
@@ -655,7 +705,7 @@ async function loadThread() {
   if (!r.ok) return box.innerHTML = `<div class=err>${esc(r.error)}</div>`;
   const atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
   box.innerHTML = r.messages.map(m =>
-    `<div class="m ${m.role}"><i>${m.role === 'user' ? 'you' : esc(r.name)} · ${ago(m.at)} ago</i>${esc(m.text)}</div>`
+    `<div class="m ${m.role}"><i>${m.role === 'user' ? 'you' : esc(r.name)} · ${ago(m.at)} ago</i>${md(m.text)}</div>`
   ).join('');
   if (atEnd) box.scrollTop = box.scrollHeight;           // only follow if already at the end
 }
