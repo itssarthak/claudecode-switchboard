@@ -728,12 +728,10 @@ function renderTraffic(t) {
     box.querySelector('.chart').innerHTML = `<div class=err>${esc(t.error || 'nothing yet')}</div>`;
     return;
   }
-  // counts add up across days; uniques do not - that figure comes from GitHub, for its own
-  // 14-day window, and is why this line separates the two spans rather than merging them
   const w = t.window;
   const total = days.reduce((n, d) => n + d.count, 0);
   box.querySelector('small').textContent =
-    (w ? `${w.count} clones · ${w.uniques} unique in ${w.days} days` : `${total} clones`)
+    (w ? `${w.count} clones in ${w.days} days` : `${total} clones`)
     + (days.length > (w?.days || 0) ? ` · ${total} over ${days.length} tracked` : '')
     + (t.repo ? ` · ${t.repo}` : '') + (t.error ? ` · ${t.error}` : '');
 
@@ -756,7 +754,7 @@ function renderTraffic(t) {
       <polygon class=area points="${L},${y(0).toFixed(1)} ${pts} ${x(days.length - 1).toFixed(1)},${y(0).toFixed(1)}" />
       <polyline class=line points="${pts}" />
       ${days.map((d, i) => `<circle class=dot cx=${x(i).toFixed(1)} cy=${y(d.count).toFixed(1)} r=${
-        days.length > 20 ? 1.6 : 2.4}><title>${d.date}: ${d.count} clones, ${d.uniques} unique</title></circle>`).join('')}
+        days.length > 20 ? 1.6 : 2.4}><title>${d.date}: ${d.count} clones</title></circle>`).join('')}
       ${labels}
     </svg>`;
 }

@@ -392,14 +392,14 @@ auto-detected slug.
 `~/.switchboard/traffic.json`, so the history outlives the window — the same approach the token
 ledger already takes.
 
-**The bug worth recording:** the header first read *67 unique* where GitHub's own page said *56*.
-Daily uniques cannot be summed — someone cloning on three days is 3 daily uniques but 1 unique
-person. GitHub de-duplicates across the window, so its top-level `uniques` is now stored and shown
-as-is, and the line separates the two: counts add across days, uniques do not.
+**The bug worth recording**, even though the number is gone now: the header first read *67 unique*
+where GitHub's own page said *56*. Daily uniques cannot be summed — someone cloning on three days
+is 3 daily uniques but 1 unique person; GitHub de-duplicates across the window. The count was then
+removed at the owner's request (`0.7.1`) — only clones were asked for — but the trap is worth
+knowing if anyone puts uniques back: take GitHub's top-level figure, never a sum of the days.
 
 **Verified:** the rendered curve matches the GitHub screenshot point for point (flat, then 13, 11,
-16, 5, 32, 7), the peak's tooltip reads `2026-08-29: 32 clones, 23 unique`, and the header now
-matches GitHub exactly at 84/56. Failure paths were exercised against a non-existent repo and
+16, 5, 32, 7) and the peak's tooltip reads `2026-08-29: 32 clones`. Failure paths were exercised against a non-existent repo and
 against `torvalds/linux` (no push access): both degrade to a message and the server stays up.
 
 **Rejected:** a charting library. An axis, a path and a fill is about thirty lines of SVG, and it
