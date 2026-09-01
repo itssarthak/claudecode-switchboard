@@ -94,6 +94,27 @@ sorted by tokens burned.
   blocked on**. Clicking one copies `claude attach <id>`, since there is no terminal to raise.
   Finished jobs are skipped, matching `claude agents` without `--all`.
 
+### Letting an agent compact itself
+
+`/compact` is typed into the TUI, so an agent can't run it on itself — it is mid-turn inside the
+thing it would need to type into. It *can* run a shell command, though:
+
+```bash
+curl -sX POST "localhost:7823/self?pid=$$&cmd=compact"
+```
+
+`$$` is all the caller needs to know. The server walks up the process tree until it finds a pid the
+session registry recognises — one or two hops from a tool call — and types the command into that
+session's terminal. Because the session is mid-turn, the input **queues and runs when the turn
+ends**, which is what you want: the agent finishes its work, then compacts.
+
+`GET /self?pid=$$` answers "which session am I, and what may I run" without doing anything.
+
+The command is checked against the same allowlist as `/send` — `compact`, `context`, `cost`,
+`status` — before anything is typed. Anything else is refused by name, so `cmd=bash` and
+`cmd=compact;rm -rf /` both come back as *not allowed* rather than being run. To offer it to your
+agents, put the curl in your `CLAUDE.md`.
+
 ## Requirements
 
 - **macOS.** Terminal focus and `/compact` use AppleScript, plan usage reads the
@@ -353,6 +374,8 @@ rules.
 | `POST /talk?pid=` | Type the request body into that session's prompt. |
 | `GET /thread?pid=` | The last 24 turns of that session, for the composer. |
 | `GET /message?pid=&at=&to=` | The full body behind one chatter summary. |
+| `GET /self?pid=` | Which session that pid is inside, and what commands are allowed. |
+| `POST /self?pid=&cmd=` | Run an allowlisted command on the caller's *own* session. |
 | `POST /kill?pid=` | SIGTERM that session. |
 
 ## License

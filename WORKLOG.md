@@ -399,6 +399,36 @@ warn about, met from the one direction that isn't obvious: removing a feature st
 **Standing note:** if repo traffic ever comes back, `gh api repos/<slug>/traffic/clones` is the
 endpoint, it needs push access, it only serves 14 days, and daily uniques must never be summed.
 
+## 2026-09-01 — An agent can compact itself (`0.8.0`)
+
+**What:** `POST /self?pid=$$&cmd=compact`. The caller passes its own pid and the server works out
+which session that is, then types the command into that session's terminal.
+
+**Why:** `/compact` is a TUI keystroke. An agent is mid-turn *inside* the TUI, so it cannot type it,
+and there was no other way for a session to compact itself. It can run a shell command, so the curl
+is the missing hop.
+
+**Resolution is the whole feature.** `/send` already existed with the allowlist — what was missing
+was a way for a caller to name itself. It walks up the process tree from the given pid until it
+hits one the session registry knows: from a Bash tool call that is one or two hops (tool shell ->
+`claude`). Capped at 12 hops.
+
+**The queue is the point, not a limitation.** The caller is busy by definition — it is mid-turn
+asking for this — so the typed input queues and runs when the turn ends. Confirmed live:
+`{"ok":true,"app":"Terminal","tty":"ttys082","queued":true}`.
+
+**Verified, including every way in:** resolved this session from `$$` as pid 27153 "me"; `cmd=bash`
+refused; `cmd=compact;rm -rf /` refused *by name*, since it is matched as one whole string against
+the allowlist rather than parsed; `pid=1` refused as not inside a session; a request carrying
+`Origin: https://evil.example` refused; and GET returns identity without running anything.
+
+**Note:** `sameOrigin()` already passed curl — a request with no `Origin` header is allowed, which
+is what makes this reachable at all. That was existing behaviour, not something loosened for this.
+
+**Left as-is:** the allowlist keeps all four commands rather than narrowing to `compact`. The other
+three are read-only and already worked from the dashboard; removing them would have taken away
+something that works to satisfy a "for now".
+
 ---
 
 ## Standing notes for whoever works here next

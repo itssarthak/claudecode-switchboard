@@ -519,6 +519,39 @@ function type(pid, line) {
   } catch (e) { return { ok: false, app, tty, error: String(e.stderr || e.message).slice(0, 200) } }
 }
 
+// An agent cannot run /compact on itself: the command is typed into the TUI, and the agent is
+// mid-turn inside that TUI. It can run a shell command though, so it can ask us to type it - and
+// the input queues, so the compact happens once its turn ends. All the caller has to know is its
+// own pid: walk up the process tree until a pid the session registry recognises, which for a tool
+// call is one or two hops (tool shell -> claude).
+function ppidMap() {
+  const m = new Map();
+  try {
+    for (const l of execFileSync('ps', ['-eo', 'pid=,ppid=']).toString().split('\n')) {
+      const x = l.trim().match(/^(\d+)\s+(\d+)$/);
+      if (x) m.set(+x[1], +x[2]);
+    }
+  } catch {}
+  return m;
+}
+
+function sessionOfPid(pid) {
+  if (!Number.isInteger(pid) || pid < 1) return null;
+  const known = new Set(scan().filter(s => s.pid).map(s => s.pid));
+  const up = ppidMap();
+  for (let p = pid, hops = 0; p > 1 && hops < 12; p = up.get(p) ?? 0, hops++)
+    if (known.has(p)) return p;
+  return null;
+}
+
+// the caller names itself by pid and we work out which session that is
+function selfCmd(pid, cmd) {
+  const own = sessionOfPid(pid);
+  if (!own) return { ok: false, error: `pid ${pid} is not inside a Claude Code session on this machine` };
+  const s = scan().find(x => x.pid === own);
+  return { session: s?.name || String(own), pid: own, ...send(own, cmd) };
+}
+
 function send(pid, cmd) {
   if (!ALLOWED.has(cmd)) return { ok: false, error: `'${cmd}' not allowed` };
   return type(pid, `/${cmd}`);
@@ -863,7 +896,8 @@ const server = http.createServer((req, res) => {
   const threadPid = req.url.match(/^\/thread\?pid=(\d+)$/);
   const focusPid = req.url.match(/^\/focus\?pid=(\d+)$/);
   const killPid = req.url.match(/^\/kill\?pid=(\d+)$/);
-  if ((sendCmd || talkPid || focusPid || killPid) && !(sameOrigin(req) && req.method === 'POST')) {
+  const selfPost = req.url.startsWith('/self') && req.method === 'POST';
+  if ((sendCmd || talkPid || focusPid || killPid || selfPost) && !(sameOrigin(req) && req.method === 'POST')) {
     res.writeHead(403, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     return res.end(JSON.stringify({ ok: false, error: 'cross-origin or non-POST request refused' }));
   }
@@ -891,6 +925,19 @@ const server = http.createServer((req, res) => {
     const q = new URL(req.url, 'http://localhost').searchParams;
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify(messageOf(Number(q.get('pid')), Number(q.get('at')), q.get('to'))));
+  } else if (req.url.startsWith('/self')) {
+    const q = new URL(req.url, 'http://localhost').searchParams;
+    const pid = Number(q.get('pid')), cmd = q.get('cmd');
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+    if (req.method !== 'POST' || !cmd) {              // GET is "which session am I?"
+      const own = sessionOfPid(pid);
+      const s = own && scan().find(x => x.pid === own);
+      return res.end(JSON.stringify(own
+        ? { ok: true, pid: own, session: s?.name || null, cwd: s?.cwd || null, allowed: [...ALLOWED] }
+        : { ok: false, error: `pid ${pid} is not inside a Claude Code session on this machine`,
+            allowed: [...ALLOWED] }));
+    }
+    res.end(JSON.stringify(selfCmd(pid, cmd)));
   } else if (req.url === '/patterns') {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify(habits(), null, 1));
