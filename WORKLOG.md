@@ -378,35 +378,26 @@ it in both places was the same number twice. It stays in `--report`, which has n
 with the quota bands, which is precisely how the `.q` bug happened. Nothing lives in colour alone —
 both numbers are on the card and the tooltip gives the percentage.
 
-## 2026-09-01 — Git clones chart (`0.7.0`)
+## 2026-09-01 — Git clones chart removed (`0.7.2`)
 
-**What:** A clones-per-day line chart for the repo this copy came from, from
-`gh api repos/<slug>/traffic/clones`, polled every 30 minutes.
+**What:** `0.7.0` and `0.7.1` reverted. No repo traffic panel, no `gh` call, no
+`~/.switchboard/traffic.json`. The dashboard is Claude Code sessions again, and nothing else.
 
-**Why:** asked for, after the repo was published. It is admittedly off-mission — this is a session
-dashboard, and repo traffic is not a session — so it is built to disappear rather than to nag: no
-GitHub remote, no `gh`, or no push access, and the section is simply absent. `REPO` overrides the
-auto-detected slug.
+**Why:** it was off-mission, which was true when it was built and said so at the time. Repo traffic
+is not a session, and the owner already tracks clone counts on his own site — so this was a second
+place for the same number to drift out of date.
 
-**Accumulates past the API:** GitHub serves only 14 days of clone data. Each poll merges into
-`~/.switchboard/traffic.json`, so the history outlives the window — the same approach the token
-ledger already takes.
+**Reverted, not force-pushed.** The repo is public and had 56 unique cloners at the time; rewriting
+`main` would have broken every one of those clones to save two commits of history. `git revert`
+leaves them able to pull.
 
-**The bug worth recording**, even though the number is gone now: the header first read *67 unique*
-where GitHub's own page said *56*. Daily uniques cannot be summed — someone cloning on three days
-is 3 daily uniques but 1 unique person; GitHub de-duplicates across the window. The count was then
-removed at the owner's request (`0.7.1`) — only clones were asked for — but the trap is worth
-knowing if anyone puts uniques back: take GitHub's top-level figure, never a sum of the days.
+**The version had to go *up*, not back.** The revert returned both manifests to `0.6.4`, and
+installed copies were on `0.7.1` — `claude plugin update` compares versions, so every installation
+would have silently kept the panel forever. Hence `0.7.2`. This is the trap the house rules already
+warn about, met from the one direction that isn't obvious: removing a feature still needs a bump.
 
-**Verified:** the rendered curve matches the GitHub screenshot point for point (flat, then 13, 11,
-16, 5, 32, 7) and the peak's tooltip reads `2026-08-29: 32 clones`. Failure paths were exercised against a non-existent repo and
-against `torvalds/linux` (no push access): both degrade to a message and the server stays up.
-
-**Rejected:** a charting library. An axis, a path and a fill is about thirty lines of SVG, and it
-would have been the first dependency in the project.
-
-**Also fixed:** `B = 010 + 18` — a legacy octal literal that quietly evaluated to 26, and would
-throw outright in strict mode.
+**Standing note:** if repo traffic ever comes back, `gh api repos/<slug>/traffic/clones` is the
+endpoint, it needs push access, it only serves 14 days, and daily uniques must never be summed.
 
 ---
 

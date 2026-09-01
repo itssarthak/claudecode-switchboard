@@ -61,11 +61,7 @@ sorted by tokens burned.
   day, and whether you'll run dry before the reset. The rate that would land exactly on the reset
   shows as `target N/day` under *all tokens today*. See [Weekly budget](#weekly-budget).
 
-**Three sections below the tiles**
-- **Git clones** — clone counts per day for the repo this copy came from, if `gh` is installed and
-  you have push access to it. GitHub only keeps 14 days, so each poll is merged into
-  `~/.switchboard/traffic.json` and the history grows past what the API will tell you. Set `REPO`
-  to point it elsewhere; with no GitHub remote the section simply doesn't appear.
+**Two sections below the tiles**
 - **Tokens spent** — per day for the last 30, and per quota week, from the persistent ledger.
 - **How you use Claude Code** — prompts by local hour and weekday, the tools you reach for
   most, models and reasoning effort, average prompt length, how often you interrupt a turn,

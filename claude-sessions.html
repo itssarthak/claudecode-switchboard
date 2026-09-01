@@ -170,12 +170,12 @@
                  border-bottom-left-radius: .55rem; border-bottom-right-radius: .55rem }
   @media (prefers-reduced-motion: reduce) { .note { display: none } }
 
-  #spend, #habits, #traffic { margin-top: 2.2rem; border-top: 1px solid var(--line); padding-top: 1rem }
-  #spend > summary, #habits > summary, #traffic > summary { cursor: pointer; font-weight: 700; list-style: none; margin-bottom: .3rem }
-  #spend > summary::-webkit-details-marker, #habits > summary::-webkit-details-marker, #traffic > summary::-webkit-details-marker { display: none }
-  #spend > summary::before, #habits > summary::before, #traffic > summary::before { content: '▸ '; display: inline-block; transition: transform .15s }
-  #spend[open] > summary::before, #habits[open] > summary::before, #traffic[open] > summary::before { transform: rotate(90deg) }
-  #spend > summary small, #habits > summary small, #traffic > summary small { font-weight: 400; color: var(--dim); font-size: .8rem; margin-left: .5rem }
+  #spend, #habits { margin-top: 2.2rem; border-top: 1px solid var(--line); padding-top: 1rem }
+  #spend > summary, #habits > summary { cursor: pointer; font-weight: 700; list-style: none; margin-bottom: .3rem }
+  #spend > summary::-webkit-details-marker, #habits > summary::-webkit-details-marker { display: none }
+  #spend > summary::before, #habits > summary::before { content: '▸ '; display: inline-block; transition: transform .15s }
+  #spend[open] > summary::before, #habits[open] > summary::before { transform: rotate(90deg) }
+  #spend > summary small, #habits > summary small { font-weight: 400; color: var(--dim); font-size: .8rem; margin-left: .5rem }
   /* the panel sits beside its project's tiles, so it scopes to the agents in that project */
   .gwrap { display: grid; grid-template-columns: minmax(0, 1fr) 600px; gap: 1rem; align-items: start }
   .gwrap.solo { grid-template-columns: 1fr }
@@ -208,16 +208,6 @@
                 overflow-wrap: anywhere }   /* a bare url in a narrow column would push the tiles */
   .chat .body p { margin: 0 0 .25rem }
   .chat .body pre { margin: .2rem 0; white-space: pre-wrap }
-  #traffic .chart { margin-top: .8rem; max-width: 46rem }
-  #traffic svg { width: 100%; height: auto; display: block; overflow: visible }
-  #traffic .grid { stroke: var(--line) }
-  #traffic .line { fill: none; stroke: #4c9a5a; stroke-width: 2;
-                   stroke-linejoin: round; stroke-linecap: round }
-  #traffic .area { fill: #4c9a5a; opacity: .12 }
-  #traffic .dot { fill: #4c9a5a }
-  #traffic text { fill: currentColor; opacity: .55; font-size: 9px;
-                  font-family: ui-monospace, Menlo, monospace }
-  #traffic .err { color: var(--dim); font-size: .82rem; margin-top: .6rem }
   .hgrid { display: grid; gap: 1.4rem 2.4rem; margin-top: .8rem;
            grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)) }
   .hgrid h3 { font-size: .78rem; margin: 0 0 .5rem; color: var(--dim); font-weight: 600 }
@@ -295,7 +285,6 @@
 <div id=groups></div>
 <details id=spend open><summary>Tokens spent <small></small></summary><div class=hgrid></div></details>
 <details id=habits open><summary>How you use Claude Code <small></small></summary><div class=hgrid></div></details>
-<details id=traffic open><summary>Git clones <small></small></summary><div class=chart></div></details>
 <div id=talk>
   <div class=to><span>message <b id=talkto></b></span>
     <span>enter to send · esc to close <button id=talkclose title="close">&times;</button></span></div>
@@ -716,49 +705,6 @@ async function renderSpend() {
 renderSpend();
 setInterval(renderSpend, 60e3);
 
-// A small line chart, drawn by hand rather than pulled in: an axis, a path and a fill is about
-// thirty lines, and a charting library would be the first dependency in the project.
-function renderTraffic(t) {
-  const box = document.getElementById('traffic');
-  if (!t || (!t.days?.length && !t.error)) { box.style.display = 'none'; return }
-  box.style.display = '';
-  const days = t.days || [];
-  if (!days.length) {
-    box.querySelector('small').textContent = '';
-    box.querySelector('.chart').innerHTML = `<div class=err>${esc(t.error || 'nothing yet')}</div>`;
-    return;
-  }
-  const w = t.window;
-  const total = days.reduce((n, d) => n + d.count, 0);
-  box.querySelector('small').textContent =
-    (w ? `${w.count} clones in ${w.days} days` : `${total} clones`)
-    + (days.length > (w?.days || 0) ? ` · ${total} over ${days.length} tracked` : '')
-    + (t.repo ? ` · ${t.repo}` : '') + (t.error ? ` · ${t.error}` : '');
-
-  const W = 640, H = 170, L = 34, R = 8, T = 10, B = 28;   // 28 = gridline label room + the date row
-  const max = Math.max(4, ...days.map(d => d.count));
-  const step = Math.pow(10, Math.floor(Math.log10(max))) * (max / Math.pow(10, Math.floor(Math.log10(max))) > 5 ? 2 : 1);
-  const top = Math.ceil(max / step) * step;
-  const x = i => L + (days.length === 1 ? 0 : i * (W - L - R) / (days.length - 1));
-  const y = v => T + (1 - v / top) * (H - T - B);
-  const pts = days.map((d, i) => `${x(i).toFixed(1)},${y(d.count).toFixed(1)}`).join(' ');
-  const ticks = [0, top / 2, top].map(v =>
-    `<line class=grid x1=${L} x2=${W - R} y1=${y(v).toFixed(1)} y2=${y(v).toFixed(1)} />
-     <text x=${L - 6} y=${(y(v) + 3).toFixed(1)} text-anchor=end>${v}</text>`).join('');
-  const every = Math.ceil(days.length / 7);
-  const labels = days.map((d, i) => i % every ? '' :
-    `<text x=${x(i).toFixed(1)} y=${H - 4} text-anchor=middle>${d.date.slice(5).replace('-', '/')}</text>`).join('');
-  box.querySelector('.chart').innerHTML = `
-    <svg viewBox="0 0 ${W} ${H}" role=img aria-label="clones per day">
-      ${ticks}
-      <polygon class=area points="${L},${y(0).toFixed(1)} ${pts} ${x(days.length - 1).toFixed(1)},${y(0).toFixed(1)}" />
-      <polyline class=line points="${pts}" />
-      ${days.map((d, i) => `<circle class=dot cx=${x(i).toFixed(1)} cy=${y(d.count).toFixed(1)} r=${
-        days.length > 20 ? 1.6 : 2.4}><title>${d.date}: ${d.count} clones</title></circle>`).join('')}
-      ${labels}
-    </svg>`;
-}
-
 // --- session chatter ---------------------------------------------------------------
 // Every session-to-session message is written twice: the sender logs a SendMessage tool_use
 // (outbox) and the receiver logs a <cross-session-message> (inbox). The receiver's copy is
@@ -863,12 +809,11 @@ function chatterFor(cwd, feed) {
 }
 
 async function tick() {
-  const { sessions, rollup, quota, budget, traffic, idleNotifMs, defaultModel } = await (await fetch('/api')).json();
+  const { sessions, rollup, quota, budget, idleNotifMs, defaultModel } = await (await fetch('/api')).json();
   if (idleNotifMs > 0) IDLE_MS = idleNotifMs;
   DEF_MODEL = defaultModel || null;
   renderQuota(quota);
   renderBudget(budget);
-  renderTraffic(traffic);
   const d0 = new Date(), today = rollup.days[new Date(d0 - d0.getTimezoneOffset() * 6e4).toISOString().slice(0, 10)] || {};
   const sum = f => sessions.reduce((n, s) => n + (s.usage ? f(s.usage) : 0), 0);
 

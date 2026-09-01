@@ -3,7 +3,7 @@
 //   state:  ~/.claude/sessions/<pid>.json      (pid, cwd, name, status)
 //   usage:  ~/.claude/projects/<slug>/<sessionId>.jsonl  (per-message token usage)
 const fs = require('fs'), http = require('http'), path = require('path'), os = require('os');
-const { execFileSync, execFile } = require('child_process');
+const { execFileSync } = require('child_process');
 const HOME = os.homedir();
 const SESSIONS = path.join(HOME, '.claude', 'sessions');
 const PROJECTS = path.join(HOME, '.claude', 'projects');
@@ -579,60 +579,6 @@ async function fetchQuota() {
   } catch (e) { return quotaErr = String(e.message || e) }
 }
 
-// --- repo traffic --------------------------------------------------------------------
-// GitHub only keeps 14 days of clone counts, so every poll is merged into a file on disk and the
-// history accumulates past what the API will tell you. Auth is whatever `gh` already has; the
-// endpoint needs push access to the repo, so this only ever works for repos you own.
-const TCACHE = path.join(DATA, 'traffic.json');
-const TRAFFIC_EVERY = 30 * 60e3;
-let traffic = { repo: null, days: {}, at: 0, error: 'not fetched yet' };
-try { traffic = { ...traffic, ...JSON.parse(fs.readFileSync(TCACHE, 'utf8')) } } catch {}
-
-// the repo this copy came from, unless REPO says otherwise. No remote means no panel, which is
-// the right default: this is a session dashboard, and repo traffic is only useful if it is yours.
-function repoSlug() {
-  if (process.env.REPO) return process.env.REPO;
-  try {
-    const url = execFileSync('git', ['-C', __dirname, 'remote', 'get-url', 'origin'],
-      { stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000 }).toString().trim();
-    return url.match(/github\.com[:/]([^/]+\/[^/.]+)/)?.[1] || null;
-  } catch { return null }
-}
-
-let trafficAt = 0;
-function fetchTraffic() {
-  trafficAt = Date.now();
-  const repo = repoSlug();
-  if (!repo) { traffic.error = 'no github remote'; return }
-  execFile('gh', ['api', `repos/${repo}/traffic/clones`], { timeout: 15e3 }, (err, out) => {
-    if (err) {                                           // gh missing, not logged in, or no push access
-      traffic.error = /not found|403/i.test(String(err.message)) ? 'gh has no push access to this repo'
-                    : /ENOENT/.test(String(err.message)) ? 'gh cli not installed'
-                    : String(err.message).split('\n')[0].slice(0, 80);
-      return;
-    }
-    try {
-      const j = JSON.parse(out);
-      traffic.repo = repo; traffic.error = null; traffic.at = Date.now();
-      // uniques are de-duplicated across the whole window, so they cannot be summed per day -
-      // one person cloning on three days is 3 daily uniques but 1 unique. Keep GitHub's own figure.
-      traffic.window = { count: j.count, uniques: j.uniques, days: (j.clones || []).length };
-      for (const d of j.clones || [])                    // merge, so days older than 14 survive
-        traffic.days[d.timestamp.slice(0, 10)] = { count: d.count, uniques: d.uniques };
-      fs.mkdirSync(DATA, { recursive: true });
-      fs.writeFileSync(TCACHE, JSON.stringify(traffic));
-    } catch (e) { traffic.error = String(e.message || e).slice(0, 80) }
-  });
-}
-
-const trafficOf = () => {
-  if (Date.now() - trafficAt > TRAFFIC_EVERY) fetchTraffic();
-  const days = Object.entries(traffic.days).sort().slice(-30)
-    .map(([date, v]) => ({ date, ...v }));
-  return { repo: traffic.repo, at: traffic.at, error: traffic.error, days,
-           window: traffic.window || null };
-};
-
 // a failed refresh keeps serving the last good numbers, flagged stale - better than blanking the bar
 const quota = () => {
   if (Date.now() - quotaAt > QUOTA_EVERY) fetchQuota();
@@ -953,7 +899,7 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify(report(), null, 1));
   } else if (req.url === '/api') {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-    res.end(JSON.stringify({ sessions: correlate(scan()), rollup, quota: quota(), budget: budget(), traffic: trafficOf(), idleNotifMs: idleNotifMs(), defaultModel: defaultModel(), now: Date.now() }));
+    res.end(JSON.stringify({ sessions: correlate(scan()), rollup, quota: quota(), budget: budget(), idleNotifMs: idleNotifMs(), defaultModel: defaultModel(), now: Date.now() }));
   } else {
     res.writeHead(200, { 'content-type': 'text/html', 'cache-control': 'no-store' });
     fs.createReadStream(path.join(__dirname, 'claude-sessions.html')).pipe(res);
