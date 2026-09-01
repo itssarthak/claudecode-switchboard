@@ -38,7 +38,7 @@ const blank = () => ({
   tok: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, thinking: 0 },
   msgs: 0, turns: 0, tools: 0, byTool: {}, sidechain: 0, ctx: 0, daily: {},
   model: null, effort: null, branch: null, lastAt: 0, modelAt: 0,
-  summary: null, lastUser: null, lastAssistant: null, lastTool: null, lastToolAt: 0,
+  summary: null, lastUser: null, lastUserAt: 0, lastAssistant: null, lastTool: null, lastToolAt: 0,
   inbox: [], outbox: [], pat: {}, thread: [], full: [],
 });
 
@@ -123,7 +123,7 @@ function ingest(st, e) {
       st.inbox.push({ at: ts, from: Number(x[1]), name: x[2] || null, body: clip(x[3]) });
       st.inbox.splice(0, st.inbox.length - 20);
     }
-    if (t && e.type === 'user' && !NOISE.test(t)) st.lastUser = t.slice(0, 300);
+    if (t && e.type === 'user' && !NOISE.test(t)) { st.lastUser = t.slice(0, 300); st.lastUserAt = ts }
     if (t && e.type === 'assistant') st.lastAssistant = t.slice(0, 300);
     // rolling transcript tail for the composer. Streaming rewrites the same assistant
     // message repeatedly, so match on id and replace rather than append a duplicate.
@@ -568,6 +568,54 @@ function talk(pid, raw) {
 // Shared endpoint: Claude Code itself calls it, once per session. Poll it gently, cache
 // across restarts, and back off hard on 429 - hammering it is what gets you rate limited.
 const DATA = path.join(HOME, '.switchboard');
+
+// --- await list ------------------------------------------------------------------------
+// A session that is waiting on something looks exactly like an idle one from out here, and
+// Claude Code records no blocked state anywhere - `stalled` is a heuristic precisely because
+// there is nothing to read. So the session says so itself, and ends its turn.
+//
+// A wait ends when a NEW user turn arrives in that session, which is the thing that would
+// actually unblock it. The registering tool call is mid-turn, so anchoring on the session's
+// general activity would clear the entry a second after it was written; it anchors on the
+// timestamp of the last real user message instead.
+const AWAITFILE = path.join(DATA, 'awaiting.json');
+const AWAIT_MAX = 500;
+let awaiting = [];
+try { awaiting = JSON.parse(fs.readFileSync(AWAITFILE, 'utf8')) } catch {}
+const saveAwait = () => {
+  try { fs.mkdirSync(DATA, { recursive: true }); fs.writeFileSync(AWAITFILE, JSON.stringify(awaiting)) } catch {}
+};
+
+function awaitAdd(pid, raw) {
+  const text = String(raw ?? '').replace(CTRL, ' ').replace(/\s+/g, ' ').trim();
+  if (!text) return { ok: false, error: 'say what you are waiting for' };
+  const own = sessionOfPid(pid);
+  if (!own) return { ok: false, error: `pid ${pid} is not inside a Claude Code session on this machine` };
+  const s = scan().find(x => x.pid === own);
+  if (!s) return { ok: false, error: 'no such session' };
+  awaiting = awaiting.filter(a => a.sessionId !== s.sessionId);      // one wait per session
+  awaiting.push({ sessionId: s.sessionId, pid: own, name: s.name || null, cwd: s.cwd || null,
+                  at: Date.now(), sinceUserAt: s.usage?.lastUserAt || 0,
+                  waitingFor: text.slice(0, AWAIT_MAX) });
+  saveAwait();
+  return { ok: true, session: s.name || String(own), waitingFor: text.slice(0, AWAIT_MAX) };
+}
+
+// longest wait first: the whole point is that the top of the list is who has been stuck longest
+function awaitList(sessions) {
+  const by = new Map(sessions.map(s => [s.sessionId, s]));
+  const keep = awaiting.filter(a => {
+    const s = by.get(a.sessionId);
+    if (!s) return false;                            // session is gone; the wait is meaningless
+    return !(s.usage?.lastUserAt > a.sinceUserAt);   // a new user turn answered it
+  });
+  if (keep.length !== awaiting.length) { awaiting = keep; saveAwait() }
+  return keep.map(a => {
+    const s = by.get(a.sessionId);
+    return { ...a, name: s.name || a.name, alive: !!s.alive, status: s.status || null };
+  }).sort((x, y) => x.at - y.at);
+}
+
 const QCACHE = path.join(DATA, 'quota-cache.json');
 const QUOTA_EVERY = 5 * 60e3;
 
@@ -896,8 +944,9 @@ const server = http.createServer((req, res) => {
   const threadPid = req.url.match(/^\/thread\?pid=(\d+)$/);
   const focusPid = req.url.match(/^\/focus\?pid=(\d+)$/);
   const killPid = req.url.match(/^\/kill\?pid=(\d+)$/);
+  const awaitPid = req.url.match(/^\/await\?pid=(\d+)$/);
   const selfPost = req.url.startsWith('/self') && req.method === 'POST';
-  if ((sendCmd || talkPid || focusPid || killPid || selfPost) && !(sameOrigin(req) && req.method === 'POST')) {
+  if ((sendCmd || talkPid || focusPid || killPid || selfPost || awaitPid) && !(sameOrigin(req) && req.method === 'POST')) {
     res.writeHead(403, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     return res.end(JSON.stringify({ ok: false, error: 'cross-origin or non-POST request refused' }));
   }
@@ -925,6 +974,14 @@ const server = http.createServer((req, res) => {
     const q = new URL(req.url, 'http://localhost').searchParams;
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify(messageOf(Number(q.get('pid')), Number(q.get('at')), q.get('to'))));
+  } else if (awaitPid) {
+    body(req).then(
+      t => awaitAdd(Number(awaitPid[1]), t),
+      e => ({ ok: false, error: String(e.message || e) }),
+    ).then(r => {
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      res.end(JSON.stringify(r));
+    });
   } else if (req.url.startsWith('/self')) {
     const q = new URL(req.url, 'http://localhost').searchParams;
     const pid = Number(q.get('pid')), cmd = q.get('cmd');
@@ -945,8 +1002,9 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify(report(), null, 1));
   } else if (req.url === '/api') {
+    const sess = correlate(scan());
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-    res.end(JSON.stringify({ sessions: correlate(scan()), rollup, quota: quota(), budget: budget(), idleNotifMs: idleNotifMs(), defaultModel: defaultModel(), now: Date.now() }));
+    res.end(JSON.stringify({ sessions: sess, awaiting: awaitList(sess), rollup, quota: quota(), budget: budget(), idleNotifMs: idleNotifMs(), defaultModel: defaultModel(), now: Date.now() }));
   } else {
     res.writeHead(200, { 'content-type': 'text/html', 'cache-control': 'no-store' });
     fs.createReadStream(path.join(__dirname, 'claude-sessions.html')).pipe(res);

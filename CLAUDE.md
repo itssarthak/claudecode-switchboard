@@ -29,6 +29,8 @@ the other way, or learned something about Claude Code's internals. Skip it for t
 - **Bump `version` in both `.claude-plugin/plugin.json` and `package.json`** for anything worth
   shipping. `claude plugin update` compares versions, not commits, so without a bump installed
   copies keep serving old code.
+- **A green `--selftest` does not mean the server runs.** It exits early, so it cannot catch a
+  load-order or module-level error. Start the server and curl `/api` before you commit.
 - **`node claude-sessions.js --selftest` must pass** before you commit. It covers token
   accounting and the `/talk` sanitiser.
 

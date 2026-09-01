@@ -94,6 +94,24 @@ sorted by tokens burned.
   blocked on**. Clicking one copies `claude attach <id>`, since there is no terminal to raise.
   Finished jobs are skipped, matching `claude agents` without `--all`.
 
+### The await list
+
+A session that is waiting on something looks exactly like an idle one from the outside — the
+`stalled` badge is a heuristic precisely because Claude Code records no blocked state anywhere. So
+the session says so itself:
+
+> `await(waiting_for)` — Register what this session is waiting on, then end your turn.
+
+The wait appears in an **Awaiting** panel at the top of the dashboard, **longest wait first**, so
+whoever has been stuck longest is the top row. Clicking a row jumps to that session's terminal.
+
+An entry **clears itself** the next time someone sends that session a message — the thing that
+would actually unblock it. Entries for sessions that no longer exist are dropped. One entry per
+session; calling it again replaces the previous one.
+
+This is the only state on the page that is *declared* rather than inferred, which makes it the
+reliable one. Tell your agents to use it in your `CLAUDE.md`.
+
 ### Letting an agent compact itself
 
 **As a tool (recommended).** Installing the plugin gives every session a `compact_self` tool, so
@@ -389,6 +407,8 @@ rules.
 | `GET /message?pid=&at=&to=` | The full body behind one chatter summary. |
 | `GET /self?pid=` | Which session that pid is inside, and what commands are allowed. |
 | MCP `compact_self` | The same thing as a tool, for agents. No arguments. |
+| MCP `await` | Register what this session is waiting on, then end the turn. |
+| `POST /await?pid=` | The same, over HTTP; the text rides in the body. |
 | `POST /self?pid=&cmd=` | Run an allowlisted command on the caller's *own* session. |
 | `POST /kill?pid=` | SIGTERM that session. |
 

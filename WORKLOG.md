@@ -462,6 +462,40 @@ session — that would have compacted the owner's conversation to prove a point.
 fails there — the same reason Cursor sessions can't be typed into at all. The error says so rather
 than failing silently.
 
+## 2026-09-01 — The await list (`0.10.0`)
+
+**What:** an `await(waiting_for)` MCP tool, `POST /await?pid=`, and an **Awaiting** panel at the top
+of the dashboard ordered by longest wait.
+
+**Why:** suggested by a commenter, and it solves the thing the dashboard structurally cannot. From
+outside, a session waiting on something external is indistinguishable from an idle one — `stalled`
+is a heuristic only because Claude Code writes no blocked state anywhere. A session that *declares*
+what it is waiting on is the one piece of state on the page that is not inferred.
+
+**The clearing rule was the only real design question.** "Clear when the session next does
+something" fails: the tool call is itself mid-turn, so the entry would vanish a second after being
+written. It anchors on `lastUserAt` — the timestamp of the last real user message — and clears when
+a newer one arrives, which is the event that would actually unblock it. That meant adding
+`lastUserAt` to the parser; only `lastUser` (the text) was tracked.
+
+**Ordering is the feature.** Tiles sort by tokens burned, which is the wrong axis for "who needs
+me". The panel sorts oldest-first so the longest wait is the top row.
+
+**Verified:** registration, the empty-text refusal, a pid outside any session, and a cross-origin
+POST all behave. Both lifecycle rules were tested deterministically by seeding
+`~/.switchboard/awaiting.json` and restarting — an entry with a stale `sinceUserAt` and one naming a
+dead session were both dropped, and the pruned file was written back. The MCP leg was driven over
+stdio against a stub: two tools exposed, `waiting_for` required, and `POST /await?pid=<own pid>`
+carrying the text in the body.
+
+**`--selftest` did not catch the bug this introduced.** The first version put the await block above
+`const DATA`, so the server died at load with a TDZ error — while `--selftest` still printed OK,
+because it exits before reaching that line. **A green selftest does not mean the server starts.**
+Start it and curl it.
+
+**Not built yet:** waking a waiting session automatically. Switchboard can already type into a
+terminal, so "check back in 1m" is reachable — left until the list alone proves insufficient.
+
 ---
 
 ## Standing notes for whoever works here next

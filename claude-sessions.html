@@ -170,6 +170,18 @@
                  border-bottom-left-radius: .55rem; border-bottom-right-radius: .55rem }
   @media (prefers-reduced-motion: reduce) { .note { display: none } }
 
+  /* longest wait first - the top row is whoever has been stuck longest, which is the point */
+  #awaiting { margin: 1.4rem 0 0; border: 1px solid var(--line); border-radius: .6rem;
+              padding: .6rem .8rem }
+  #awaiting h3 { font-size: .8rem; font-weight: 700; margin: 0 0 .5rem }
+  #awaiting h3 small { font-weight: 400; color: var(--dim); margin-left: .4rem }
+  #awaiting .a { display: grid; grid-template-columns: 4.5rem 11rem 1fr; gap: .7rem;
+                 padding: .3rem 0; font-size: .82rem; cursor: pointer; align-items: baseline }
+  #awaiting .a:hover { background: color-mix(in srgb, currentColor 6%, transparent) }
+  #awaiting .a + .a { border-top: 1px solid var(--line) }
+  #awaiting .w { color: #d99a45; text-align: right; font-variant-numeric: tabular-nums }
+  #awaiting .who { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+  #awaiting .dead { color: var(--dim) }
   #spend, #habits { margin-top: 2.2rem; border-top: 1px solid var(--line); padding-top: 1rem }
   #spend > summary, #habits > summary { cursor: pointer; font-weight: 700; list-style: none; margin-bottom: .3rem }
   #spend > summary::-webkit-details-marker, #habits > summary::-webkit-details-marker { display: none }
@@ -282,6 +294,7 @@
 <div id=budget></div>
 <div class=legend id=legend></div>
 </header>
+<div id=awaiting></div>
 <div id=groups></div>
 <details id=spend open><summary>Tokens spent <small></small></summary><div class=hgrid></div></details>
 <details id=habits open><summary>How you use Claude Code <small></small></summary><div class=hgrid></div></details>
@@ -472,6 +485,21 @@ document.addEventListener('toggle', e => {
 }, true);                                     // 'toggle' does not bubble - capture instead
 
 // derived weekly budget: reported % paired with measured tokens
+// Sessions that said what they are waiting on. This is the one piece of state on the page that
+// is declared rather than inferred - `stalled` next door is a guess, this is the session's own word.
+function renderAwaiting(list) {
+  const box = document.getElementById('awaiting');
+  if (!list?.length) { box.style.display = 'none'; return }
+  box.style.display = '';
+  box.innerHTML = `<h3>Awaiting <small>${list.length} session${list.length > 1 ? 's' : ''} · longest first</small></h3>`
+    + list.map(a => `<div class=a data-pid="${a.pid}" title="waiting since ${
+        esc(new Date(a.at).toLocaleString())}${a.alive ? '' : ' · session is gone'}">
+        <span class=w>${ago(a.at)}</span>
+        <span class="who${a.alive ? '' : ' dead'}">${esc(a.name || a.sessionId.slice(0, 8))}</span>
+        <span>${esc(a.waitingFor)}</span>
+      </div>`).join('');
+}
+
 function renderBudget(b) {
   const el = document.getElementById('budget'), w = b?.week;
   if (!w?.impliedFullWeek) { el.style.display = 'none'; return }
@@ -809,11 +837,12 @@ function chatterFor(cwd, feed) {
 }
 
 async function tick() {
-  const { sessions, rollup, quota, budget, idleNotifMs, defaultModel } = await (await fetch('/api')).json();
+  const { sessions, awaiting, rollup, quota, budget, idleNotifMs, defaultModel } = await (await fetch('/api')).json();
   if (idleNotifMs > 0) IDLE_MS = idleNotifMs;
   DEF_MODEL = defaultModel || null;
   renderQuota(quota);
   renderBudget(budget);
+  renderAwaiting(awaiting);
   const d0 = new Date(), today = rollup.days[new Date(d0 - d0.getTimezoneOffset() * 6e4).toISOString().slice(0, 10)] || {};
   const sum = f => sessions.reduce((n, s) => n + (s.usage ? f(s.usage) : 0), 0);
 
@@ -946,7 +975,7 @@ document.addEventListener('click', async e => {
                       : `couldn't send: ${r.error}`);
   }
   if (e.target.closest('details.more')) return;      // expanding is not a focus click
-  const el = e.target.closest('.tile'); if (!el) return;
+  const el = e.target.closest('.tile') || e.target.closest('#awaiting .a'); if (!el) return;
   if (!el.dataset.pid) {                            // a background job has no terminal to raise
     const cmd = `claude attach ${el.dataset.job}`;
     navigator.clipboard?.writeText(cmd).catch(() => {});

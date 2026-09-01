@@ -36,6 +36,16 @@ async function findPort() {
   return null;
 }
 
+async function post(pathAndQuery, body) {
+  const port = await findPort();
+  if (!port) return { ok: false, error: 'switchboard is not running - start it with /switchboard' };
+  try {
+    const r = await fetch(`http://127.0.0.1:${port}${pathAndQuery}`,
+      { method: 'POST', body, signal: AbortSignal.timeout(8000) });
+    return await r.json();
+  } catch (e) { return { ok: false, error: String(e.message || e) } }
+}
+
 async function compactSelf() {
   const port = await findPort();
   if (!port) return { ok: false, error: 'switchboard is not running - start it with /switchboard' };
@@ -47,6 +57,23 @@ async function compactSelf() {
 }
 
 const TOOLS = [{
+  name: 'await',
+  description:
+    'Register what this session is waiting on, then end your turn. Use it instead of sitting '
+    + 'blocked: when you need a decision, an approval, a credential, or something external to '
+    + 'finish, say what you are waiting for and stop. It appears on the switchboard dashboard in a '
+    + 'list ordered by who has waited longest, so a human can see what you need. The entry clears '
+    + 'by itself the next time someone sends this session a message. One entry per session - '
+    + 'calling it again replaces the previous one.',
+  inputSchema: {
+    type: 'object',
+    properties: { waiting_for: { type: 'string',
+      description: 'What you are waiting on, in one line. Be specific and actionable: '
+                 + '"approval to deploy the held bundle", not "waiting for input".' } },
+    required: ['waiting_for'],
+    additionalProperties: false,
+  },
+}, {
   name: 'compact_self',
   description:
     'Compact your own Claude Code session, freeing context. Use when your context is nearly full '
@@ -74,14 +101,27 @@ async function handle(msg) {
     case 'ping': return ok(id, {});
     case 'tools/list': return ok(id, { tools: TOOLS });
     case 'tools/call': {
-      if (params?.name !== 'compact_self') return fail(id, -32602, `unknown tool: ${params?.name}`);
-      const r = await compactSelf();
-      return ok(id, {
-        content: [{ type: 'text', text: r.ok
-          ? `Queued /compact for "${r.session}" (pid ${r.pid}). It runs when this turn ends.`
-          : `Could not compact: ${r.error}` }],
-        isError: !r.ok,
-      });
+      const name = params?.name;
+      if (name === 'await') {
+        const r = await post(`/await?pid=${process.pid}`, String(params?.arguments?.waiting_for ?? ''));
+        return ok(id, {
+          content: [{ type: 'text', text: r.ok
+            ? `Registered. "${r.session}" is waiting on: ${r.waitingFor}\nEnd your turn now - `
+              + `this clears when someone next messages this session.`
+            : `Could not register the wait: ${r.error}` }],
+          isError: !r.ok,
+        });
+      }
+      if (name === 'compact_self') {
+        const r = await compactSelf();
+        return ok(id, {
+          content: [{ type: 'text', text: r.ok
+            ? `Queued /compact for "${r.session}" (pid ${r.pid}). It runs when this turn ends.`
+            : `Could not compact: ${r.error}` }],
+          isError: !r.ok,
+        });
+      }
+      return fail(id, -32602, `unknown tool: ${name}`);
     }
     default: return fail(id, -32601, `unknown method: ${method}`);
   }
