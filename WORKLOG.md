@@ -378,6 +378,36 @@ it in both places was the same number twice. It stays in `--report`, which has n
 with the quota bands, which is precisely how the `.q` bug happened. Nothing lives in colour alone —
 both numbers are on the card and the tooltip gives the percentage.
 
+## 2026-09-01 — Git clones chart (`0.7.0`)
+
+**What:** A clones-per-day line chart for the repo this copy came from, from
+`gh api repos/<slug>/traffic/clones`, polled every 30 minutes.
+
+**Why:** asked for, after the repo was published. It is admittedly off-mission — this is a session
+dashboard, and repo traffic is not a session — so it is built to disappear rather than to nag: no
+GitHub remote, no `gh`, or no push access, and the section is simply absent. `REPO` overrides the
+auto-detected slug.
+
+**Accumulates past the API:** GitHub serves only 14 days of clone data. Each poll merges into
+`~/.switchboard/traffic.json`, so the history outlives the window — the same approach the token
+ledger already takes.
+
+**The bug worth recording:** the header first read *67 unique* where GitHub's own page said *56*.
+Daily uniques cannot be summed — someone cloning on three days is 3 daily uniques but 1 unique
+person. GitHub de-duplicates across the window, so its top-level `uniques` is now stored and shown
+as-is, and the line separates the two: counts add across days, uniques do not.
+
+**Verified:** the rendered curve matches the GitHub screenshot point for point (flat, then 13, 11,
+16, 5, 32, 7), the peak's tooltip reads `2026-08-29: 32 clones, 23 unique`, and the header now
+matches GitHub exactly at 84/56. Failure paths were exercised against a non-existent repo and
+against `torvalds/linux` (no push access): both degrade to a message and the server stays up.
+
+**Rejected:** a charting library. An axis, a path and a fill is about thirty lines of SVG, and it
+would have been the first dependency in the project.
+
+**Also fixed:** `B = 010 + 18` — a legacy octal literal that quietly evaluated to 26, and would
+throw outright in strict mode.
+
 ---
 
 ## Standing notes for whoever works here next
