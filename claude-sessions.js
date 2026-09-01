@@ -958,4 +958,9 @@ server.on('error', e => {
   server.listen(server.__port = (server.__port || PORT) + 1, HOST);
 });
 if (!String(process.argv[2] || '').startsWith('--'))    // --report / --selftest must not bind a port
-  server.listen(PORT, HOST, () => console.log(`http://localhost:${server.address().port}`));
+  server.listen(PORT, HOST, () => {
+    const port = server.address().port;
+    // the port walks upward if 7823 is taken, so record it - the MCP server has to find us
+    try { fs.mkdirSync(DATA, { recursive: true }); fs.writeFileSync(path.join(DATA, 'port'), String(port)) } catch {}
+    console.log(`http://localhost:${port}`);
+  });

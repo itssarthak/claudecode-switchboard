@@ -96,6 +96,19 @@ sorted by tokens burned.
 
 ### Letting an agent compact itself
 
+**As a tool (recommended).** Installing the plugin gives every session a `compact_self` tool, so
+your agents already have it — nothing to configure, nothing to put in `CLAUDE.md`, no pid to pass.
+Claude Code spawns the MCP server as a child of the session, so the server works out which session
+called it from its own process tree. Restart Claude Code after installing for the tool to appear.
+
+> `compact_self` — Compact your own Claude Code session, freeing context. The command is queued
+> into your session, so it runs once your current turn finishes.
+
+Only `compact` is exposed as a tool. The other allowlisted commands print into the terminal, where
+the agent that asked for them cannot read the output — useful from the dashboard, pointless here.
+
+**As a curl**, if you'd rather not run the MCP server:
+
 `/compact` is typed into the TUI, so an agent can't run it on itself — it is mid-turn inside the
 thing it would need to type into. It *can* run a shell command, though:
 
@@ -375,6 +388,7 @@ rules.
 | `GET /thread?pid=` | The last 24 turns of that session, for the composer. |
 | `GET /message?pid=&at=&to=` | The full body behind one chatter summary. |
 | `GET /self?pid=` | Which session that pid is inside, and what commands are allowed. |
+| MCP `compact_self` | The same thing as a tool, for agents. No arguments. |
 | `POST /self?pid=&cmd=` | Run an allowlisted command on the caller's *own* session. |
 | `POST /kill?pid=` | SIGTERM that session. |
 

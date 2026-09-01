@@ -429,6 +429,39 @@ is what makes this reachable at all. That was existing behaviour, not something 
 three are read-only and already worked from the dashboard; removing them would have taken away
 something that works to satisfy a "for now".
 
+## 2026-09-01 — compact_self as an MCP tool (`0.9.0`)
+
+**What:** the plugin now ships an MCP server (`switchboard-mcp.js`, declared in `.mcp.json`)
+exposing one tool, `compact_self`. Installing the plugin is the whole setup — agents have it.
+
+**Why this beats the curl:** Claude Code spawns a stdio MCP server as a **child of the session
+process**, so `process.pid`'s ancestry leads straight to the session. The agent passes nothing —
+no pid, no session id, no port. Verified against a running server: MCP pid `15254` → parent
+`15133` → `claude`, which is a registered session.
+
+**Deliberately thin.** It resolves nothing and validates nothing itself — it POSTs to `/self`,
+which already does both. Two copies of that logic would be two things to keep in step.
+
+**Only `compact` is exposed.** `context`, `cost` and `status` are on the HTTP allowlist and stay
+there, but their output prints into the terminal where the agent that asked cannot read it. Useful
+from the dashboard, pointless as a tool.
+
+**Port discovery:** the server walks upward from 7823 if the port is taken and never recorded where
+it landed. It now writes `~/.switchboard/port` on listen; the MCP server reads that, falls back to
+probing 7823-7832, and honours `SWITCHBOARD_PORT`.
+
+**Verified** by driving the server over stdio against a stub: `initialize` returns the right
+serverInfo, `tools/list` returns `compact_self`, `tools/call` produced exactly
+`POST /self?pid=<own pid>&cmd=compact`, an unknown tool name is refused, a deliberately malformed
+JSON frame did not kill the process, and a notification (`notifications/initialized`) correctly drew
+no response. Real ancestry resolution was checked separately and read-only: a spawned grandchild
+process resolved to pid 27153, the right session. The tool was never called for real against a live
+session — that would have compacted the owner's conversation to prove a point.
+
+**Known limit:** in Cursor the MCP server's parent is a Cursor helper, not `claude`, so resolution
+fails there — the same reason Cursor sessions can't be typed into at all. The error says so rather
+than failing silently.
+
 ---
 
 ## Standing notes for whoever works here next
