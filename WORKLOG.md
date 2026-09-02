@@ -496,6 +496,42 @@ Start it and curl it.
 **Not built yet:** waking a waiting session automatically. Switchboard can already type into a
 terminal, so "check back in 1m" is reachable — left until the list alone proves insufficient.
 
+## 2026-09-02 — The budget was inflated 43x (`0.11.0`)
+
+**What:** the quota window is now anchored on the **observed** restart of the reported percentage,
+not on `resets_at` minus seven days. The dashboard was showing `100% ≈ 58.36B` where the truth was
+about `1.36B`.
+
+**The actual cause, which was not the first theory.** I assumed a mid-window reset that left
+`resets_at` alone. The sample history said otherwise: on **2026-09-01 23:34 the percentage went
+58% → 0% and `resets_at` moved at the same time** — to a point only **2.4 days** later, not seven.
+So the window genuinely is not seven days long, and deriving its start from its end put us four days
+early. Four extra days of measured tokens were then divided by a percentage counting from zero.
+`1.75B / 0.03 = 58B`.
+
+**Fix:** any drop of ≥5 percentage points is a restart, whether or not `resets_at` moves with it,
+and that instant becomes the measurement anchor. Stored in `~/.switchboard/quota-anchor.json`, valid
+while it falls inside the current window.
+
+**Recovering the window we were already in:** the poller only sees drops that happen while it runs,
+and this one predated the detector. But the sampler had been recording the percentage every five
+minutes all along, so the restart was in `samples.jsonl` — `backfillAnchor()` scans for the most
+recent drop and anchors to it. It found 2026-09-01 23:34 and the measured figure fell from 1.75B to
+39M, which is what 3% of ~1.3B should look like.
+
+**Provisional rather than hidden.** My first attempt suppressed the budget below 5% reported. That
+trades a wrong number for no number, and no number for a whole day is worse. It now shows the
+estimate with the arithmetic swing stated: at 3%, half a point of rounding is ±17%.
+
+**Verified:** anchor recovered from history unaided; implied went 58.36B → 1.36B; the strip carries
+both the provisional and the re-anchored explanations; `--selftest` gained six assertions on the
+drop detector (restart, mid-window reset, ordinary growth, rounding noise, sub-threshold drop, and
+missing readings). The detector had to move above the CLI blocks to be reachable from the selftest,
+which exits before the rest of the file — the same TDZ shape as `osaLit`.
+
+**Also:** the strip says "this window" rather than "this week" when re-anchored, because 2.4 days
+is not a week and the label was quietly making the same wrong assumption the code was.
+
 ---
 
 ## Standing notes for whoever works here next

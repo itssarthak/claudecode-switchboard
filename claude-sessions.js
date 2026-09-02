@@ -317,6 +317,11 @@ function cleanTalk(raw) {
 }
 const osaLit = t => t.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 
+const RESET_DROP = 5;                                    // percentage points; ignores rounding noise
+const droppedReset = (a, b) =>
+  a != null && b != null && b <= a - RESET_DROP;         // pure, so --selftest can exercise it
+
+
 if (process.argv[2] === '--patterns') {
   setTimeout(() => {
     const h = habits(Number(process.argv[3]) || 90);
@@ -391,6 +396,15 @@ if (process.argv[2] === '--patterns') {
   assert.strictEqual(cleanTalk('   ').error, 'empty message');
   assert.ok(cleanTalk('x'.repeat(TALK_MAX + 1)).error.startsWith('too long'));
   assert.strictEqual(cleanTalk('x'.repeat(TALK_MAX)).text.length, TALK_MAX);
+  // the quota window is anchored on an observed restart; a regression here silently inflates
+  // every derived number, which is exactly what happened on 2026-09-01
+  assert.ok(droppedReset(58, 0), 'a restart is a drop');
+  assert.ok(droppedReset(49, 3), 'mid-window reset');
+  assert.ok(!droppedReset(49, 52), 'ordinary growth is not a restart');
+  assert.ok(!droppedReset(49, 47), 'rounding noise is not a restart');
+  assert.ok(!droppedReset(5, 3), 'a drop under the threshold is not a restart');
+  assert.ok(!droppedReset(null, 3) && !droppedReset(58, null), 'missing readings are not a restart');
+
   console.log('selftest OK', path.basename(file), inc.tok, `msgs=${inc.msgs}`);
   process.exit(0);
 }
@@ -654,10 +668,55 @@ async function fetchQuota() {
     if (r.status === 401) return quotaErr = 'token expired - run any claude command to refresh';
     if (!r.ok) return quotaErr = `HTTP ${r.status}`;
     backoff = 0; quotaErr = null;
+    const prev = quotaGood;
     quotaGood = { at: Date.now(), ...(await r.json()) };
+    noteReset(prev, quotaGood);
     try { fs.mkdirSync(DATA, { recursive: true }); fs.writeFileSync(QCACHE, JSON.stringify({ at: quotaGood.at, data: quotaGood })) } catch {}
     return quotaGood;
   } catch (e) { return quotaErr = String(e.message || e) }
+}
+
+// The budget only works if measured tokens and the reported percentage count from the SAME
+// instant. The obvious anchor - `resets_at` minus seven days - is wrong, and observably so: on
+// 2026-09-01 the percentage went 58% -> 0% and resets_at moved to a point only 2.4 days later, not
+// seven. Deriving the start from the end put the window four days before the counter restarted, so
+// four extra days of tokens were divided by a percentage that started from zero. That is how
+// "100% is 58B" happens.
+//
+// So the anchor is the observed restart: any large drop in the reported percentage, whether or not
+// resets_at moves with it. That instant is when the counter began, which is the only thing we
+// actually need. A later drop replaces it.
+const ANCHOR = path.join(DATA, 'quota-anchor.json');
+let anchor = null;
+try { anchor = JSON.parse(fs.readFileSync(ANCHOR, 'utf8')) } catch {}
+const saveAnchor = () => {
+  try {
+    fs.mkdirSync(DATA, { recursive: true });
+    if (anchor) fs.writeFileSync(ANCHOR, JSON.stringify(anchor));
+    else fs.rmSync(ANCHOR, { force: true });
+  } catch {}
+};
+
+function noteReset(prev, next) {
+  if (droppedReset(prev?.seven_day?.utilization, next?.seven_day?.utilization)) {
+    anchor = { at: Date.now(), resetsAt: next.seven_day.resets_at,
+               from: prev.seven_day.utilization, to: next.seven_day.utilization };
+    saveAnchor();
+  }
+}
+
+// the poller only sees drops that happen while it is running, and this one predates the detector.
+// The sampler has been recording the percentage every 5 minutes all along, so the restart is in
+// that history - find the most recent one and anchor to it.
+function backfillAnchor() {
+  if (anchor) return;
+  let prev = null, found = null;
+  for (const r of readSamples()) {
+    if (r.week == null) continue;
+    if (droppedReset(prev, r.week)) found = { at: r.t, resetsAt: r.resets || null, from: prev, to: r.week };
+    prev = r.week;
+  }
+  if (found) { anchor = { ...found, backfilled: true }; saveAnchor() }
 }
 
 // a failed refresh keeps serving the last good numbers, flagged stale - better than blanking the bar
@@ -740,6 +799,7 @@ const totalAt = (samples, t) => {
 };
 
 function report() {
+  backfillAnchor();                                      // recover a restart that predates the detector
   const samples = readSamples();
   // the endpoint rate limits; fall back to the last sample that carried a percentage so
   // the report still works while we are backed off
@@ -748,7 +808,12 @@ function report() {
   const pct = live ? quotaGood.seven_day.utilization : (last?.week ?? null);
   const resetsIso = live ? quotaGood.seven_day.resets_at : (last?.resets ?? null);
   const resets = resetsIso ? Date.parse(resetsIso) : null;
-  const weekStart = resets ? resets - 7 * 864e5 : null;
+  const scheduledStart = resets ? resets - 7 * 864e5 : null;
+  // an anchor from the last fortnight is an observed restart and beats the assumed one; anything
+  // older is stale, and resets_at - 7d is the only estimate left
+  const usable = anchor && resets && anchor.at < resets && anchor.at > resets - 14 * 864e5;
+  const reAnchored = !!usable;
+  const weekStart = usable ? anchor.at : scheduledStart;
   const now = Date.now(), nowTotal = ledgerTotal();
   // a stale percentage was true at its sample time, so measure tokens up to that moment
   const asOf = live ? now : (last?.t ?? now);
@@ -762,7 +827,16 @@ function report() {
       .filter(([d]) => d >= dayKey(weekStart)).reduce((n, [, v]) => n + totalOf(v), 0);
   }
 
-  // the number they actually want: what is 100%, in tokens, for this week
+  // the number they actually want: what is 100%, in tokens, for this week.
+  // used/pct is a division by the reported percentage, so it is only as stable as that percentage:
+  // at 3% a single point of rounding moves the answer by a third. Below the floor we publish
+  // nothing rather than a number that is confidently wrong, and say why.
+  // Early in a window the percentage is a small integer, so one point of rounding moves the answer
+  // a long way: at 3%, +/- 0.5 is +/- 17%. Still worth showing - it is the only estimate there is -
+  // but flagged, so nobody plans against a number that could move by a fifth on the next poll.
+  const PCT_FLOOR = 5;
+  const provisional = pct != null && pct > 0 && pct < PCT_FLOOR;
+  const swing = provisional ? Math.round(0.5 / pct * 100) : 0;
   const implied = (weekUsed && pct) ? Math.round(weekUsed / (pct / 100)) : null;
   const elapsed = weekStart ? (asOf - weekStart) / 864e5 : null;
   const rate = (weekUsed && elapsed > 0) ? weekUsed / elapsed : null;
@@ -810,6 +884,10 @@ function report() {
       note: pct == null ? (quotaErr || 'no plan percentage recorded yet - cannot derive a budget')
           : live ? null : `percentage is from ${new Date(asOf).toLocaleString()} (${quotaErr})`,
       impliedFullWeek: implied,
+      reAnchored: !!reAnchored,
+      anchoredAt: reAnchored ? new Date(anchor.at).toISOString() : null,
+      anchorBackfilled: !!(reAnchored && anchor.backfilled),
+      provisional, swingPct: swing,
       tokensRemaining: implied && weekUsed != null ? implied - weekUsed : null,
       runRatePerDay: rate ? Math.round(rate) : null,
       // what is left, spread evenly over the time still on the clock: spend at this rate and the

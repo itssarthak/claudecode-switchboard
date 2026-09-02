@@ -502,20 +502,32 @@ function renderAwaiting(list) {
 
 function renderBudget(b) {
   const el = document.getElementById('budget'), w = b?.week;
-  if (!w?.impliedFullWeek) { el.style.display = 'none'; return }
+  if (!w?.impliedFullWeek) {
+    // vanishing without explanation looks like a bug; say why there is no budget
+    if (!w?.note) { el.style.display = 'none'; return }
+    el.style.display = 'flex';
+    el.innerHTML = `<span class=lead>No weekly budget yet</span><span class=cav>${esc(w.note)}${
+      w.tokensUsed ? ` · ${k(w.tokensUsed)} measured so far this window` : ''}</span>`;
+    return;
+  }
   el.style.display = 'flex';
   const reset = w.resetsAt && new Date(w.resetsAt), out = w.exhaustedAt && new Date(w.exhaustedAt);
   const over = out && reset && out < reset;                 // runs dry before the week rolls over
   const short = d => d.toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
   const gap = out && reset ? Math.abs(reset - out) / 36e5 : null;
   el.innerHTML = `
-    <span class=lead>100% ≈ ${k(w.impliedFullWeek)} tokens this week</span>
+    <span class=lead>100% ≈ ${k(w.impliedFullWeek)} tokens this ${w.reAnchored ? 'window' : 'week'}</span>
     <span><b>${k(w.tokensUsed)}</b> <i>used (${w.percentUsed}%)</i></span>
     <span><b>${k(w.tokensRemaining)}</b> <i>left</i></span>
     <span><b>${k(w.runRatePerDay)}</b><i>/day run rate</i></span>
     <span><b>${k(w.projectedFullWeek)}</b> <i>projected =</i> <b class="${over ? 'over' : 'under'}">${w.projectedPercent}%</b></span>
     ${out ? `<span class="${over ? 'over' : 'under'}">${over ? `runs out ${short(out)}` : `resets first ${short(reset)}`}</span>
              <i>${gap != null ? `${gap < 24 ? Math.round(gap) + 'h' : Math.round(gap / 24) + 'd'} ${over ? 'before reset' : 'to spare'}` : ''}</i>` : ''}
+    ${w.provisional ? `<span class=cav><b class=over>provisional</b> — only ${w.percentUsed}% reported
+      so far, so this could move by about ±${w.swingPct}% on the next poll.</span>` : ''}
+    ${w.reAnchored ? `<span class=cav>counting from ${new Date(w.anchoredAt).toLocaleString()}, when
+      the reported percentage was observed to restart${w.anchorBackfilled ? ' (found in sample history)' : ''}
+      — not from <i>resets_at</i> minus seven days, which this window is not.</span>` : ''}
     <span class=cav>derived: measured tokens ÷ reported %. Raw volume, dominated by cache reads — a
       relative yardstick, not Anthropic's own weighting.${w.exact ? '' : ' This week is approximate: no sample from week start.'}${
       w.percentIsLive ? '' : ` ${esc(w.note || '')}`}</span>`;

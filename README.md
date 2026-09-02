@@ -146,6 +146,18 @@ The command is checked against the same allowlist as `/send` — `compact`, `con
 `cmd=compact;rm -rf /` both come back as *not allowed* rather than being run. To offer it to your
 agents, put the curl in your `CLAUDE.md`.
 
+### How the window is worked out
+
+The budget pairs *your* measured tokens with *their* reported percentage, so both have to count from
+the same instant. That instant is **not** `resets_at` minus seven days — observed on 2026-09-01, the
+percentage restarted while `resets_at` moved to a point 2.4 days later. So switchboard anchors on
+the observed restart instead: any drop of 5+ points in the reported percentage starts a new window,
+recorded in `~/.switchboard/quota-anchor.json`. A restart that happened before the dashboard was
+running is recovered from the 5-minute samples in `samples.jsonl`.
+
+While the reported percentage is still low, the estimate is marked **provisional** with its
+arithmetic swing — at 3%, half a point of rounding is ±17%.
+
 ## Requirements
 
 - **macOS.** Terminal focus and `/compact` use AppleScript, plan usage reads the
