@@ -135,6 +135,17 @@ function ingest(st, e) {
     if (x) {
       st.inbox.push({ at: ts, from: Number(x[1]), name: x[2] || null, body: clip(x[3]) });
       st.inbox.splice(0, st.inbox.length - 20);
+      // NOISE keeps these out of the thread as a pseudo-user turn, and rightly - but dropping them
+      // entirely leaves the session answering a question nobody can see. It is a message; show it
+      // as one, marked as coming from another session rather than from you.
+      if (st.pend.n) { st.thread.push(toolRun(st.pend)); st.pend = { n: 0, at: 0, last: 0, names: {} } }
+      st.thread.push({ role: 'peer', at: ts, from: x[2] || `pid ${x[1]}`,
+                       text: clip(x[3], THREAD_CHARS) });
+      let spoken = 0;
+      for (let i = st.thread.length - 1; i >= 0; i--) {
+        if (st.thread[i].role !== 'tools') spoken++;
+        if (spoken > THREAD_TURNS) { st.thread.splice(0, i + 1); break }
+      }
     }
     if (t && e.type === 'user' && !NOISE.test(t)) { st.lastUser = t.slice(0, 300); st.lastUserAt = ts }
     if (t && e.type === 'assistant') st.lastAssistant = t.slice(0, 300);

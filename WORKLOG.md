@@ -633,6 +633,33 @@ both the old and new scripts fail it identically at the same line. The check is 
 comparison — it does not prove the iTerm2 path works, and that path is still unverified on real
 hardware.
 
+## 2026-09-02 — Incoming messages, and a thread that crept downward (`0.15.1`)
+
+**What:** messages another session sends to this one now appear in the talk thread, and the thread
+stops scrolling itself while you read.
+
+**Incoming messages were being dropped.** `NOISE` keeps injected pseudo-user turns out of the
+thread, and "Another Claude session sent…" matched it. Right that they should not look like the
+owner spoke; wrong to drop them, because the session was then visibly answering something nobody
+could see. They are their own entry now — purple rail and name, against blue for you and green for
+the session — so `Product Head → Harvey` sits directly above Harvey's reply to it. Live counts on
+first run: Harvey 6, Engineering Head 5, Admin Dashboard Manager 1.
+
+**The scroll drift was scroll anchoring.** Reported as "why is the chat always scrolling down".
+Measured: `scrollTop` moved **+74px every poll** — 3492 → 3566 → 3640 → 3714 — while `scrollHeight`
+stayed at 8730, so nothing was being added. `loadThread` replaced the whole `innerHTML` every 2
+seconds, which destroys the node the browser had anchored the scroll to; its re-anchoring guess
+walked the view down a little each time. The existing `atEnd` check was fine and irrelevant — the
+drift happened *below* it.
+
+**Fix:** re-render only when the rendered HTML actually differs from what is on screen, keyed by
+pid, and restore `scrollTop` when it does. Plus `overflow-anchor: none` on the log. A quiet thread
+now does not repaint at all. Verified: parked mid-thread, `scrollTop` held at 3276 across four
+polls, and it still follows when already at the bottom.
+
+**Still asymmetric:** outgoing messages show only as `⚙ 1 tool call · SendMessage`, so you see what
+a session receives but not what it says back to a peer. Offered, not yet built.
+
 ---
 
 ## Standing notes for whoever works here next

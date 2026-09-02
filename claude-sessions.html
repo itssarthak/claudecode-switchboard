@@ -280,7 +280,7 @@
               border: 1px solid var(--line); border-radius: .3rem;
               background: transparent; color: var(--fg) }
   #talksend:hover { border-color: color-mix(in srgb, currentColor 45%, transparent) }
-  #talklog { flex: 1; min-height: 0; overflow-y: auto; margin-bottom: .45rem;
+  #talklog { flex: 1; min-height: 0; overflow-y: auto; overflow-anchor: none; margin-bottom: .45rem;
             font-size: .8rem; line-height: 1.45; display: flex; flex-direction: column; gap: .55rem }
   #talklog:empty { display: none }
   #talklog .m { overflow-wrap: anywhere; white-space: pre-wrap }
@@ -316,6 +316,11 @@
   #talklog .tools { border-left-color: transparent; color: var(--dim); font-size: .72rem;
                     padding-top: .35rem; padding-bottom: .1rem }
   #talklog .cut { display: block; margin-top: .3rem; font-size: .7rem; color: var(--dim) }
+  /* a message from another session: neither you nor this session, so it gets its own colour */
+  #talklog .peer { border-left-color: #a07cc6; border-left-color: light-dark(#7a4fa0, #a07cc6);
+                   color: var(--dim) }
+  #talklog .peer > i.hd b { color: #a07cc6; color: light-dark(#7a4fa0, #a07cc6) }
+  #talklog .peer b { color: var(--fg); font-weight: 400 }
   #talklog .assistant { color: var(--dim) }
   #talklog .assistant b { color: var(--fg); font-weight: 400 }
   #talklog .err { color: var(--dim) }
@@ -956,6 +961,7 @@ const toast = m => { const t = document.getElementById('toast');
 
 const talkBox = () => document.getElementById('talk');
 
+let threadSig = '';                                      // what the log is currently showing
 async function loadThread() {
   const pid = talkPid, box = document.getElementById('talklog');
   if (pid == null) return;
@@ -985,16 +991,28 @@ async function loadThread() {
   const working = state === 'busy'
     ? `<div class="m working"><b>${esc(r.name)}</b> is working<i><span>.</span><span>.</span><span>.</span></i></div>`
     : '';
-  box.innerHTML = r.messages.map(m => m.role === 'tools' ? toolLine(m) :
+  const peerLine = m => `<div class="m peer"><i class=hd><b>${esc(m.from)}</b> → ${esc(r.name)} · ${
+    ago(m.at)} ago</i>${md(m.text)}</div>`;
+  const html = r.messages.map(m => m.role === 'tools' ? toolLine(m) : m.role === 'peer' ? peerLine(m) :
     `<div class="m ${m.role}"><i class=hd><b>${m.role === 'user' ? 'you' : esc(r.name)}</b> · ${
       ago(m.at)} ago</i>${md(m.text)}${
       m.cut ? '<span class=cut>… truncated — open the session to read the rest</span>' : ''}</div>`
   ).join('') + working;
-  if (atEnd) box.scrollTop = box.scrollHeight;           // only follow if already at the end
+
+  // Replacing innerHTML every 2s destroys the node the browser had anchored the scroll to, and its
+  // re-anchoring guess walked the view down ~74px a poll - the thread crept downward while you read
+  // it. Re-render only when something actually changed, and put the scroll back where it was.
+  const sig = talkPid + '\u0000' + html;
+  if (sig === threadSig) return;
+  threadSig = sig;
+  const top = box.scrollTop;
+  box.innerHTML = html;
+  box.scrollTop = atEnd ? box.scrollHeight : top;        // only follow if already at the end
 }
 
 function openTalk(pid, name) {
   talkPid = pid;
+  threadSig = '';
   document.getElementById('talkto').textContent = name;
   document.getElementById('talklog').innerHTML = '';
   talkBox().classList.add('on');
