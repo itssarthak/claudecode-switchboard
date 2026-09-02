@@ -279,11 +279,17 @@
                  display: block; margin-bottom: .2rem }
   #talklog .m i { font-style: italic }             /* emphasis in the message stays emphasis */
   #talklog .m + .m { border-top: 1px solid var(--line); padding-top: .55rem }
-  #talklog .user { border-left: 2px solid var(--line); padding-left: .5rem }
-  #talklog .m > i.hd b { color: var(--fg); font-weight: 600 }
+  /* who is speaking, carried by colour on the rail and the name. Blue is already "a message" in
+     this app (the flying note, the chatter sender); green is already "a live session". Darker
+     shades on light - the dark pair sits under 3:1 on white. */
+  #talklog .m { border-left: 2px solid transparent; padding-left: .5rem }
+  #talklog .user { border-left-color: #6b8fd4; border-left-color: light-dark(#3f63a8, #6b8fd4) }
+  #talklog .assistant { border-left-color: #4c9a5a; border-left-color: light-dark(#2f7a41, #4c9a5a) }
+  #talklog .user > i.hd b { color: #6b8fd4; color: light-dark(#3f63a8, #6b8fd4) }
+  #talklog .assistant > i.hd b { color: #4c9a5a; color: light-dark(#2f7a41, #4c9a5a) }
+  #talklog .m > i.hd b { font-weight: 600 }
   #talklog .cut { display: block; margin-top: .3rem; font-size: .7rem; color: var(--dim) }
-  #talklog .assistant { color: var(--dim) }
-  #talklog .assistant b { color: var(--fg); font-weight: 400 }
+  #talklog .assistant b { font-weight: 600 }
   #talklog .err { color: var(--dim) }
   #talk textarea { width: 100%; resize: vertical; min-height: 2.2rem; height: 2.2rem; flex: none;
                   font: inherit; font-size: .84rem;

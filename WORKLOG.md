@@ -557,9 +557,12 @@ mid-sentence. The thread is fetched on demand, not in the 2s payload, so the cap
 now 8000, and anything still cut carries a `cut` flag rendering as *"… truncated"*. The longest real
 message is 2494 chars, so nothing is cut today.
 
-**Left alone deliberately:** assistant text is dimmed to 55% while the owner's own messages are full
-white — the thing you are there to read is the less legible half. Flagged, and the owner chose to
-see whether it still reads badly once the rest was fixed.
+**Follow-up (`0.12.1`):** speakers are told apart by colour instead of by dimness — a blue rail and
+name for you, green for the session, both already meaning "a message" and "a live session"
+elsewhere in the app. Darker shades on light via `light-dark()`; measured 5.8/5.4 on dark and
+5.9/5.3 on light. With colour carrying the distinction, the assistant's 55% dimming was redundant
+and went, so both sides now read at full contrast — which also settles the point that was parked
+during the readability pass.
 
 ---
 
