@@ -250,13 +250,27 @@
              display: flex; justify-content: space-between; gap: 1rem }
   #talk .to b { color: var(--fg); font-weight: 600 }
   /* whether the session is actually doing anything, so a silent panel is not ambiguous */
-  #talkstate { margin-left: .5rem; font-size: .72rem; color: var(--sc, var(--dim)) }
-  #talkstate::before { content: '●'; margin-right: .25rem; color: var(--sc, var(--dim)) }
+  #talkstate { margin-left: .5rem; font-size: .66rem; padding: .1rem .45rem; border-radius: 999px;
+               white-space: nowrap; color: var(--sc); vertical-align: .05em;
+               border: 1px solid color-mix(in srgb, var(--sc) 45%, transparent);
+               background: color-mix(in srgb, var(--sc) 16%, transparent) }
+  #talkstate:empty { display: none }
+  #talkstate::before { content: '●'; margin-right: .3rem; font-size: .8em }
   #talkstate.busy { --sc: #d99a45 }
   #talkstate.idle { --sc: #4c9a5a }
   #talkstate.gone { --sc: #8b8b8b }
-  #talkstate.busy::before { animation: pulse 1.4s ease-in-out infinite }
-  @keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: .25 } }
+  #talkstate.busy::before { animation: pulse 1.2s ease-in-out infinite }
+  @keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: .2 } }
+
+  /* the header chip is easy to miss while reading, so say it again at the foot of the thread,
+     where a chat app puts "typing" and where the eye already is */
+  #talklog .working { color: #d99a45; font-size: .75rem; border-left-color: #d99a45 }
+  #talklog .working b { color: inherit; font-weight: 600 }
+  #talklog .working i { font-style: normal; letter-spacing: .1em }
+  #talklog .working i span { animation: blink 1.2s infinite }
+  #talklog .working i span:nth-child(2) { animation-delay: .2s }
+  #talklog .working i span:nth-child(3) { animation-delay: .4s }
+  @keyframes blink { 0%, 60%, 100% { opacity: .2 } 30% { opacity: 1 } }
   #talkclose { cursor: pointer; font: inherit; font-size: .95rem; line-height: 1; vertical-align: -.05em;
                background: none; border: 0; color: var(--dim); padding: 0 .1rem; margin-left: .25rem }
   #talkclose:hover { color: #c9584f }
@@ -968,11 +982,14 @@ async function loadThread() {
     return `<div class="m tools">⚙ ${m.n} tool call${m.n > 1 ? 's' : ''}${dur(m)} · ${shown}${
       rest > 0 ? ` · +${rest} more` : ''}</div>`;
   };
+  const working = state === 'busy'
+    ? `<div class="m working"><b>${esc(r.name)}</b> is working<i><span>.</span><span>.</span><span>.</span></i></div>`
+    : '';
   box.innerHTML = r.messages.map(m => m.role === 'tools' ? toolLine(m) :
     `<div class="m ${m.role}"><i class=hd><b>${m.role === 'user' ? 'you' : esc(r.name)}</b> · ${
       ago(m.at)} ago</i>${md(m.text)}${
       m.cut ? '<span class=cut>… truncated — open the session to read the rest</span>' : ''}</div>`
-  ).join('');
+  ).join('') + working;
   if (atEnd) box.scrollTop = box.scrollHeight;           // only follow if already at the end
 }
 

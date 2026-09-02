@@ -621,6 +621,13 @@ will queue*, green for *waiting for you*, grey for *session has gone*. A silent 
 between "busy thinking" and "nothing happening", and the queueing behaviour was only discoverable by
 sending something and reading the toast.
 
+**Follow-up (`0.14.1`) — the indicator was invisible in practice.** Two mistakes. Only the *busy*
+state animated, so most of the time there was a static dot and nothing to notice; and an 11px `●`
+in a dim header is easy to miss even when it is pulsing. The owner opened an idle session and
+reasonably reported seeing no pulse at all. It is now a bordered chip like the tile badges, and the
+working state is repeated at the **foot of the thread** — `Harvey is working…` with blinking dots,
+where a chat app puts "typing" and where the eye already is. Both animations confirmed running.
+
 **Note on the compile check:** `osacompile` cannot resolve iTerm2's terminology in that context, so
 both the old and new scripts fail it identically at the same line. The check is only meaningful as a
 comparison — it does not prove the iTerm2 path works, and that path is still unverified on real
