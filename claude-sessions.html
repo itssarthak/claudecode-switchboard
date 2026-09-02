@@ -241,10 +241,11 @@
   /* Lives outside #groups on purpose: tick() rebuilds every tile every 2s, which would
      eat the draft and the caret. Same lesson the compact arm taught. */
   #talk { position: fixed; left: 50%; bottom: 1.2rem; transform: translateX(-50%); z-index: 60;
-         width: min(46rem, calc(100vw - 3rem)); display: none;
+         width: min(52rem, calc(100vw - 3rem)); display: none;
+         max-height: calc(100vh - 3rem); flex-direction: column;
          border: 1px solid var(--line); border-radius: .6rem; padding: .55rem .7rem;
          background: var(--bg); box-shadow: 0 8px 28px -10px rgba(0,0,0,.6) }
-  #talk.on { display: block }
+  #talk.on { display: flex }                       /* so the log can take the leftover height */
   #talk .to { font-size: .76rem; color: var(--dim); margin-bottom: .35rem;
              display: flex; justify-content: space-between; gap: 1rem }
   #talk .to b { color: var(--fg); font-weight: 600 }
@@ -257,8 +258,8 @@
               border: 1px solid var(--line); border-radius: .3rem;
               background: transparent; color: var(--fg) }
   #talksend:hover { border-color: color-mix(in srgb, currentColor 45%, transparent) }
-  #talklog { max-height: min(42vh, 26rem); overflow-y: auto; margin-bottom: .45rem;
-            font-size: .8rem; line-height: 1.45; display: flex; flex-direction: column; gap: .5rem }
+  #talklog { flex: 1; min-height: 0; overflow-y: auto; margin-bottom: .45rem;
+            font-size: .8rem; line-height: 1.45; display: flex; flex-direction: column; gap: .55rem }
   #talklog:empty { display: none }
   #talklog .m { overflow-wrap: anywhere; white-space: pre-wrap }
   #talklog .m > :is(h4, ul, ol, pre) { white-space: normal }
@@ -272,13 +273,20 @@
                  background: color-mix(in srgb, currentColor 7%, transparent) }
   #talklog pre code { background: none; padding: 0 }
   #talklog a { color: #6b8fd4 }
-  #talklog .m i { font-style: normal; font-size: .68rem; color: var(--dim);
-                 display: block; margin-bottom: .1rem }
+  /* ONLY the "who - when" line. A bare `.m i` also catches italics the agent wrote, shrinking
+     words mid-sentence to 10px at 30% opacity - the same collision that dimmed the quota panel. */
+  #talklog .m > i.hd { font-style: normal; font-size: .7rem; color: var(--dim);
+                 display: block; margin-bottom: .2rem }
+  #talklog .m i { font-style: italic }             /* emphasis in the message stays emphasis */
+  #talklog .m + .m { border-top: 1px solid var(--line); padding-top: .55rem }
   #talklog .user { border-left: 2px solid var(--line); padding-left: .5rem }
+  #talklog .m > i.hd b { color: var(--fg); font-weight: 600 }
+  #talklog .cut { display: block; margin-top: .3rem; font-size: .7rem; color: var(--dim) }
   #talklog .assistant { color: var(--dim) }
   #talklog .assistant b { color: var(--fg); font-weight: 400 }
   #talklog .err { color: var(--dim) }
-  #talk textarea { width: 100%; resize: vertical; min-height: 3.4rem; font: inherit; font-size: .84rem;
+  #talk textarea { width: 100%; resize: vertical; min-height: 2.2rem; height: 2.2rem; flex: none;
+                  font: inherit; font-size: .84rem;
                   color: var(--fg); background: transparent; border: 1px solid var(--line);
                   border-radius: .4rem; padding: .4rem .5rem }
   #talk textarea:focus { outline: none; border-color: color-mix(in srgb, currentColor 40%, transparent) }
@@ -921,7 +929,9 @@ async function loadThread() {
   if (!r.ok) return box.innerHTML = `<div class=err>${esc(r.error)}</div>`;
   const atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
   box.innerHTML = r.messages.map(m =>
-    `<div class="m ${m.role}"><i>${m.role === 'user' ? 'you' : esc(r.name)} · ${ago(m.at)} ago</i>${md(m.text)}</div>`
+    `<div class="m ${m.role}"><i class=hd><b>${m.role === 'user' ? 'you' : esc(r.name)}</b> · ${
+      ago(m.at)} ago</i>${md(m.text)}${
+      m.cut ? '<span class=cut>… truncated — open the session to read the rest</span>' : ''}</div>`
   ).join('');
   if (atEnd) box.scrollTop = box.scrollHeight;           // only follow if already at the end
 }

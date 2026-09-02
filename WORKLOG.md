@@ -532,6 +532,35 @@ which exits before the rest of the file — the same TDZ shape as `osaLit`.
 **Also:** the strip says "this window" rather than "this week" when re-anchored, because 2.4 days
 is not a week and the label was quietly making the same wrong assumption the code was.
 
+## 2026-09-02 — The talk panel was unreadable (`0.12.0`)
+
+**What:** four fixes to the message composer, found by opening a real thread and reading it rather
+than reasoning about the markup.
+
+**1. Markdown emphasis was styled as a header.** `#talklog .m i` was written for the "Harvey · 1h
+ago" line, but it catches every `<i>` in the message — including italics the agent wrote. Emphasised
+words rendered at **10.88px and 30% opacity mid-sentence**, so *"supplies only `one` of the two
+names"* read like a broken tag. Eight of them in one thread. This is the third time a broad
+descendant selector has caught content it was never meant to — after `.q` and `.what .q`. The
+header is now `i.hd` and a bare `.m i` is restored to plain italic.
+
+**2. Nothing separated one message from the next.** An 8px gap, no rule, no border, with message
+heights running 36px to 653px. A 1px top border and a bold sender name now bound each turn.
+
+**3. The log showed 6.5% of the thread** — 416px holding 6407px — while the composer took 146px of
+the panel's 562px for a two-line textarea. The panel is now a flex column capped at the viewport,
+the log takes the leftover height, and the textarea starts at one line. Log went 416px → **828px**,
+composer 146px → 118px, visible fraction 6.5% → **11.5%**.
+
+**4. Long messages were cut at 1500 chars with nothing saying so** — 8 of 24 in this thread, ending
+mid-sentence. The thread is fetched on demand, not in the 2s payload, so the cap costs little: it is
+now 8000, and anything still cut carries a `cut` flag rendering as *"… truncated"*. The longest real
+message is 2494 chars, so nothing is cut today.
+
+**Left alone deliberately:** assistant text is dimmed to 55% while the owner's own messages are full
+white — the thing you are there to read is the less legible half. Flagged, and the owner chose to
+see whether it still reads badly once the rest was fixed.
+
 ---
 
 ## Standing notes for whoever works here next

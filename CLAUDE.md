@@ -19,6 +19,9 @@ the other way, or learned something about Claude Code's internals. Skip it for t
 
 - **Zero dependencies.** Two files and Node's stdlib. Don't add a package for what thirty lines
   can do, and don't add a build step.
+- **Never let a selector reach into message content.** `#talklog .m i`, `.q`, `.what .q` — three
+  separate bugs where a broad descendant selector styled text a user or agent wrote. Scope rules
+  for chrome to a class the chrome owns (`i.hd`), never to a bare tag inside a content block.
 - **Nothing here is public API.** The `~/.claude` layout, transcript record shapes, the peer
   socket path, the usage endpoint — all internal and liable to change. Parse defensively: skip
   records you don't understand so the failure mode is missing data, never a crash.

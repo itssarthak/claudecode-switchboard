@@ -62,7 +62,9 @@ function usage(file) {
 }
 
 // injected pseudo-user turns: tool results, <system-reminder>, observer/cross-session relays
-const THREAD_TURNS = 24, THREAD_CHARS = 1500, MSG_MAX = 20000;
+// the thread is fetched on demand, not in the 2s payload, so it can afford real messages.
+// 1500 cut 7 of 24 in a live thread, mid-sentence and with nothing saying so.
+const THREAD_TURNS = 24, THREAD_CHARS = 8000, MSG_MAX = 20000;
 const NOISE = /^(<|\[MESSAGE FROM NON-USER|Another Claude session sent|Caveat: The messages below|This session is being continued|Continue from where you left off)/;
 // receiver side of a session->session message: the socket path carries the sender's pid
 const XSESS = /<cross-session-message from="uds:[^"]*?\/(\d+)\.sock"(?:[^>]*?from-name="([^"]*)")?[^>]*>\s*([\s\S]{0,1200})/;
@@ -130,9 +132,10 @@ function ingest(st, e) {
     if (t && (e.type === 'assistant' || (e.type === 'user' && !NOISE.test(t)))) {
       const id = e.message?.id || e.uuid || null;
       const at = id && st.thread.find(m => m.id === id);
-      if (at) { at.text = t.slice(0, THREAD_CHARS); at.at = ts || at.at }
+      if (at) { at.text = t.slice(0, THREAD_CHARS); at.cut = t.length > THREAD_CHARS; at.at = ts || at.at }
       else {
-        st.thread.push({ id, role: e.type, at: ts, text: t.slice(0, THREAD_CHARS) });
+        st.thread.push({ id, role: e.type, at: ts, text: t.slice(0, THREAD_CHARS),
+                         cut: t.length > THREAD_CHARS });
         st.thread.splice(0, st.thread.length - THREAD_TURNS);
       }
     }
