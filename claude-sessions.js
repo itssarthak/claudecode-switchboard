@@ -509,6 +509,11 @@ function focus(pid) {
 // AppleScript can type into a live Terminal/iTerm tab. Anything on localhost can reach
 // this endpoint, so it is NOT a general "type into any terminal" hole: allowlist only.
 const ALLOWED = new Set(['compact', 'context', 'cost', 'status']);
+// `do script` / `write text` deliver the text AND a trailing return in one go. Claude Code's TUI
+// reads that as a paste, and a newline inside a paste is a literal newline in the prompt, not a
+// submit - so the message lands in the input box and just sits there. Sending an empty second
+// command delivers the return on its own, which does submit. If the first one already submitted,
+// the extra return meets an empty prompt and does nothing.
 const TYPE = {
   'Terminal': (tty, line) => `tell application "Terminal"
       repeat with wi from 1 to count of windows
@@ -516,6 +521,8 @@ const TYPE = {
           repeat with ti from 1 to count of tabs of window wi
             if tty of tab ti of window wi is "${tty}" then
               do script "${line}" in tab ti of window wi
+              delay 0.25
+              do script "" in tab ti of window wi
               return "ok"
             end if
           end repeat
@@ -530,6 +537,8 @@ const TYPE = {
             repeat with si from 1 to count of sessions of tab ti of window wi
               if tty of session si of tab ti of window wi is "${tty}" then
                 tell session si of tab ti of window wi to write text "${line}"
+                delay 0.25
+                tell session si of tab ti of window wi to write text ""
                 return "ok"
               end if
             end repeat

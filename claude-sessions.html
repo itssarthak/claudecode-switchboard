@@ -249,6 +249,14 @@
   #talk .to { font-size: .76rem; color: var(--dim); margin-bottom: .35rem;
              display: flex; justify-content: space-between; gap: 1rem }
   #talk .to b { color: var(--fg); font-weight: 600 }
+  /* whether the session is actually doing anything, so a silent panel is not ambiguous */
+  #talkstate { margin-left: .5rem; font-size: .72rem; color: var(--sc, var(--dim)) }
+  #talkstate::before { content: '●'; margin-right: .25rem; color: var(--sc, var(--dim)) }
+  #talkstate.busy { --sc: #d99a45 }
+  #talkstate.idle { --sc: #4c9a5a }
+  #talkstate.gone { --sc: #8b8b8b }
+  #talkstate.busy::before { animation: pulse 1.4s ease-in-out infinite }
+  @keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: .25 } }
   #talkclose { cursor: pointer; font: inherit; font-size: .95rem; line-height: 1; vertical-align: -.05em;
                background: none; border: 0; color: var(--dim); padding: 0 .1rem; margin-left: .25rem }
   #talkclose:hover { color: #c9584f }
@@ -297,8 +305,9 @@
   #talklog .assistant { color: var(--dim) }
   #talklog .assistant b { color: var(--fg); font-weight: 400 }
   #talklog .err { color: var(--dim) }
-  #talk textarea { width: 100%; resize: vertical; min-height: 2.2rem; height: 2.2rem; flex: none;
-                  font: inherit; font-size: .84rem;
+  /* height is set from scrollHeight on input, so a manual resize would only be overwritten */
+  #talk textarea { width: 100%; resize: none; min-height: 2.2rem; height: 2.2rem; flex: none;
+                  overflow-y: auto; font: inherit; font-size: .84rem;
                   color: var(--fg); background: transparent; border: 1px solid var(--line);
                   border-radius: .4rem; padding: .4rem .5rem }
   #talk textarea:focus { outline: none; border-color: color-mix(in srgb, currentColor 40%, transparent) }
@@ -319,10 +328,10 @@
 <details id=spend open><summary>Tokens spent <small></small></summary><div class=hgrid></div></details>
 <details id=habits open><summary>How you use Claude Code <small></small></summary><div class=hgrid></div></details>
 <div id=talk>
-  <div class=to><span>message <b id=talkto></b></span>
+  <div class=to><span>message <b id=talkto></b><span id=talkstate></span></span>
     <span>enter to send · esc to close <button id=talkclose title="close">&times;</button></span></div>
   <div id=talklog></div>
-  <textarea id=talktext rows=2 maxlength=2000 placeholder="type a message…"></textarea>
+  <textarea id=talktext rows=1 maxlength=2000 placeholder="type a message…"></textarea>
   <div class=foot><span>shift+enter for a newline</span><button id=talksend>send</button></div>
 </div>
 <div id=toast></div>
@@ -938,7 +947,14 @@ async function loadThread() {
   if (pid == null) return;
   let r; try { r = await (await fetch('/thread?pid=' + pid)).json() } catch { return }
   if (talkPid !== pid) return;                            // composer moved on while we waited
-  if (!r.ok) return box.innerHTML = `<div class=err>${esc(r.error)}</div>`;
+  const st = document.getElementById('talkstate');
+  if (!r.ok) { st.className = ''; st.textContent = ''; return box.innerHTML = `<div class=err>${esc(r.error)}</div>` }
+  // busy means mid-turn, so anything you send now queues behind it - say so rather than leaving
+  // the panel looking like nothing is happening
+  const state = !r.alive ? 'gone' : r.status === 'busy' ? 'busy' : 'idle';
+  st.className = state;
+  st.textContent = state === 'busy' ? 'working — your message will queue'
+                 : state === 'idle' ? 'waiting for you' : 'session has gone';
   const atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
   const dur = m => {                                     // how long the run took, if it took any time
     const s = Math.round(((m.until || m.at) - m.at) / 1000);
@@ -966,22 +982,34 @@ function openTalk(pid, name) {
   document.getElementById('talklog').innerHTML = '';
   talkBox().classList.add('on');
   const t = document.getElementById('talktext');
+  growTalk();
   t.focus(); t.setSelectionRange(t.value.length, t.value.length);
   loadThread();
   clearInterval(talkTimer); talkTimer = setInterval(loadThread, 2000);
 }
 function closeTalk() { talkPid = null; clearInterval(talkTimer); talkBox().classList.remove('on') }
 
+// grow with the text, up to a third of the window - past that the composer would be eating the
+// conversation it is a reply to, so it scrolls instead
+function growTalk() {
+  const t = document.getElementById('talktext');
+  const max = Math.max(120, Math.round(window.innerHeight * 0.33));
+  t.style.height = 'auto';                               // measure the content, not the last size
+  t.style.height = Math.min(t.scrollHeight, max) + 'px';
+}
+
 async function sendTalk() {
   const t = document.getElementById('talktext'), text = t.value.trim(), pid = talkPid;
   if (!text || pid == null) return;
-  t.value = ''; t.focus();
+  t.value = ''; growTalk(); t.focus();                    // back to one line once it has gone
   const r = await (await fetch('/talk?pid=' + pid, { method: 'POST', body: text })).json();
   if (r.ok) { loadThread(); if (r.queued) toast('queued - session is mid-turn') }
-  else { t.value = text; toast(`couldn't send: ${r.error}`) }
+  else { t.value = text; growTalk(); toast(`couldn't send: ${r.error}`) }
 }
 document.getElementById('talksend').addEventListener('click', e => { e.stopPropagation(); sendTalk() });
 document.getElementById('talkclose').addEventListener('click', e => { e.stopPropagation(); closeTalk() });
+document.getElementById('talktext').addEventListener('input', growTalk);
+window.addEventListener('resize', () => { if (talkPid != null) growTalk() });
 document.getElementById('talktext').addEventListener('keydown', e => {
   if (e.key === 'Escape') return closeTalk();
   if (e.key !== 'Enter' || e.shiftKey) return;      // shift+enter for a newline while drafting

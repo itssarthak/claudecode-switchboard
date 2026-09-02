@@ -592,6 +592,40 @@ whole time. `flex: none` on `.m`, and 0 of 36 entries are clipped now.
 **Also:** the assistant's 55% dim is back at the owner's preference, now alongside the speaker
 colours rather than instead of them.
 
+## 2026-09-02 — Enter did not send; composer grows; the session's state is visible (`0.14.0`)
+
+**The bug that mattered:** a message sent from the composer appeared in the target session's prompt
+and just sat there — the owner had to press Enter in the terminal himself.
+
+**Cause:** `do script` (Terminal) and `write text` (iTerm2) deliver the text *and* a trailing return
+as one write. Claude Code's TUI reads that as a **paste**, and a newline inside a paste is a literal
+newline in the prompt, not a submit. So the text arrived and nothing happened. The fix is to send
+the return as its own event — an empty second `do script ""` / `write text ""` after a 0.25s delay.
+If the first write did submit, the extra return meets an empty prompt and does nothing.
+
+**Verified end to end**, which mattered because the earlier round-trip test had passed on this same
+path months ago and the behaviour had since changed: sent a message to an idle session and watched
+its transcript. User turns went 4 → 5 and the text appeared as a real user message **within 5
+seconds**. An unsubmitted prompt is never written to the transcript, so this distinguishes "typed"
+from "sent" — which watching the terminal by eye would not.
+
+**Composer grows with the text:** height is set from `scrollHeight` on every input, capped at a
+third of the window, after which it scrolls. Measured: one line 54px → three lines 75px → forty
+lines 328px (33% of window, scrolling), and back to 54px when cleared. The log takes the height back
+each time (809 → 788 → 535 → 809). Reset on send and on a failed send that restores the text.
+`rows` went 2 → 1 so an empty composer is one line, and `resize` is off — a manual drag would only
+be overwritten on the next keystroke.
+
+**The session's state is now in the panel header:** an amber pulsing dot for *working — your message
+will queue*, green for *waiting for you*, grey for *session has gone*. A silent panel was ambiguous
+between "busy thinking" and "nothing happening", and the queueing behaviour was only discoverable by
+sending something and reading the toast.
+
+**Note on the compile check:** `osacompile` cannot resolve iTerm2's terminology in that context, so
+both the old and new scripts fail it identically at the same line. The check is only meaningful as a
+comparison — it does not prove the iTerm2 path works, and that path is still unverified on real
+hardware.
+
 ---
 
 ## Standing notes for whoever works here next
