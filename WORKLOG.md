@@ -564,6 +564,34 @@ elsewhere in the app. Darker shades on light via `light-dark()`; measured 5.8/5.
 and went, so both sides now read at full contrast — which also settles the point that was parked
 during the readability pass.
 
+## 2026-09-02 — Tool runs in the talk thread (`0.13.0`)
+
+**What:** a run of tool calls between two spoken messages now shows as one dim line —
+`⚙ 3 tool calls over 28s · Bash ×3` — instead of an unexplained gap.
+
+**Why:** the thread builder only ever read `type === 'text'` blocks. In the last 400 entries of a
+live session that meant **54 tool_use and 54 tool_result blocks dropped against 16 spoken
+messages** — the panel showed 21 of ~152 content blocks. Twenty minutes of real work appeared as
+nothing at all, and you could not tell working from idle.
+
+**Deliberately a summary, not the calls.** 54 tool results would drown the conversation. The run is
+collapsed to a count, a duration and the top three tool names, styled as scenery rather than speech.
+Sidechain (subagent) calls are excluded — a subagent's work is not this conversation.
+
+**Tool runs do not spend a turn.** The first version counted them against `THREAD_TURNS`, which cut
+the visible conversation from 24 spoken messages to 16 — a busy stretch would have pushed the
+conversation out of its own window. The cap now counts only what was said: 24 spoken, 12 runs, 36
+entries.
+
+**The bug this uncovered:** `#talklog` is a flex column, and its children had the default
+`flex-shrink: 1`. In an overflowing column that squashes the *shortest* items hardest — the tool
+line needed 27px and was given **11**, so it rendered as a blank strip. It computed as visible, and
+only `scrollHeight > offsetHeight` showed the clipping. Short messages had been quietly clipped this
+whole time. `flex: none` on `.m`, and 0 of 36 entries are clipped now.
+
+**Also:** the assistant's 55% dim is back at the owner's preference, now alongside the speaker
+colours rather than instead of them.
+
 ---
 
 ## Standing notes for whoever works here next

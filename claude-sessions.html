@@ -282,14 +282,20 @@
   /* who is speaking, carried by colour on the rail and the name. Blue is already "a message" in
      this app (the flying note, the chatter sender); green is already "a live session". Darker
      shades on light - the dark pair sits under 3:1 on white. */
-  #talklog .m { border-left: 2px solid transparent; padding-left: .5rem }
+  /* flex-shrink:1 in an overflowing column squashes the shortest items hardest - the tool line
+     wanted 27px and was given 11. Nothing in a scrolling log should ever be compressed. */
+  #talklog .m { border-left: 2px solid transparent; padding-left: .5rem; flex: none }
   #talklog .user { border-left-color: #6b8fd4; border-left-color: light-dark(#3f63a8, #6b8fd4) }
   #talklog .assistant { border-left-color: #4c9a5a; border-left-color: light-dark(#2f7a41, #4c9a5a) }
   #talklog .user > i.hd b { color: #6b8fd4; color: light-dark(#3f63a8, #6b8fd4) }
   #talklog .assistant > i.hd b { color: #4c9a5a; color: light-dark(#2f7a41, #4c9a5a) }
   #talklog .m > i.hd b { font-weight: 600 }
+  /* the work between two things being said - deliberately quiet, it is scenery, not conversation */
+  #talklog .tools { border-left-color: transparent; color: var(--dim); font-size: .72rem;
+                    padding-top: .35rem; padding-bottom: .1rem }
   #talklog .cut { display: block; margin-top: .3rem; font-size: .7rem; color: var(--dim) }
-  #talklog .assistant b { font-weight: 600 }
+  #talklog .assistant { color: var(--dim) }
+  #talklog .assistant b { color: var(--fg); font-weight: 400 }
   #talklog .err { color: var(--dim) }
   #talk textarea { width: 100%; resize: vertical; min-height: 2.2rem; height: 2.2rem; flex: none;
                   font: inherit; font-size: .84rem;
@@ -934,7 +940,19 @@ async function loadThread() {
   if (talkPid !== pid) return;                            // composer moved on while we waited
   if (!r.ok) return box.innerHTML = `<div class=err>${esc(r.error)}</div>`;
   const atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
-  box.innerHTML = r.messages.map(m =>
+  const dur = m => {                                     // how long the run took, if it took any time
+    const s = Math.round(((m.until || m.at) - m.at) / 1000);
+    return s < 5 ? '' : s < 90 ? ` over ${s}s` : ` over ${Math.round(s / 60)}m`;
+  };
+  const toolLine = m => {
+    const top = Object.entries(m.names).sort((a, b) => b[1] - a[1]);
+    const shown = top.slice(0, 3).map(([n, c]) => `${esc(n.replace(/^mcp__[^_]+__/, ''))}${
+      c > 1 ? ` ×${c}` : ''}`).join(' · ');
+    const rest = top.length - 3;
+    return `<div class="m tools">⚙ ${m.n} tool call${m.n > 1 ? 's' : ''}${dur(m)} · ${shown}${
+      rest > 0 ? ` · +${rest} more` : ''}</div>`;
+  };
+  box.innerHTML = r.messages.map(m => m.role === 'tools' ? toolLine(m) :
     `<div class="m ${m.role}"><i class=hd><b>${m.role === 'user' ? 'you' : esc(r.name)}</b> · ${
       ago(m.at)} ago</i>${md(m.text)}${
       m.cut ? '<span class=cut>… truncated — open the session to read the rest</span>' : ''}</div>`

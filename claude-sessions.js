@@ -40,6 +40,7 @@ const blank = () => ({
   model: null, effort: null, branch: null, lastAt: 0, modelAt: 0,
   summary: null, lastUser: null, lastUserAt: 0, lastAssistant: null, lastTool: null, lastToolAt: 0,
   inbox: [], outbox: [], pat: {}, thread: [], full: [],
+  pend: { n: 0, at: 0, last: 0, names: {} },   // tool calls since the last thing that was said
 });
 
 function usage(file) {
@@ -70,6 +71,11 @@ const NOISE = /^(<|\[MESSAGE FROM NON-USER|Another Claude session sent|Caveat: T
 const XSESS = /<cross-session-message from="uds:[^"]*?\/(\d+)\.sock"(?:[^>]*?from-name="([^"]*)")?[^>]*>\s*([\s\S]{0,1200})/;
 // summaries are short (median ~56 chars); only the raw-body fallback needs cutting, and
 // slicing mid-word looks broken - break at whitespace instead
+// A stretch of tool calls with nothing said is most of what a session does - 54 tool calls to 16
+// spoken messages in a live transcript - and dropping it silently leaves an unexplained gap where
+// the work was. One line naming the run is enough; the calls themselves would drown the thread.
+const toolRun = p => ({ role: 'tools', at: p.at, until: p.last, n: p.n, names: { ...p.names } });
+
 const clip = (t, n = 700) => {
   t = String(t || '').trim();
   if (t.length <= n) return t;
@@ -106,6 +112,11 @@ function ingest(st, e) {
     st.tools++; st.byTool[p.name] = (st.byTool[p.name] || 0) + 1;
     st.lastTool = p.name; st.lastToolAt = ts;                        // best "doing right now" signal
     if (ts) bump(patDay(st, ts).tool, p.name);
+    if (!e.isSidechain) {
+      st.pend.n++; st.pend.names[p.name] = (st.pend.names[p.name] || 0) + 1;
+      if (!st.pend.at) st.pend.at = ts;
+      st.pend.last = ts;
+    }
     if (p.name === 'SendMessage') {
       st.outbox.push({ at: ts, to: p.input?.to ?? null, summary: p.input?.summary || null,
                        preview: clip(p.input?.message) });
@@ -134,9 +145,16 @@ function ingest(st, e) {
       const at = id && st.thread.find(m => m.id === id);
       if (at) { at.text = t.slice(0, THREAD_CHARS); at.cut = t.length > THREAD_CHARS; at.at = ts || at.at }
       else {
+        if (st.pend.n) { st.thread.push(toolRun(st.pend)); st.pend = { n: 0, at: 0, last: 0, names: {} } }
         st.thread.push({ id, role: e.type, at: ts, text: t.slice(0, THREAD_CHARS),
                          cut: t.length > THREAD_CHARS });
-        st.thread.splice(0, st.thread.length - THREAD_TURNS);
+        // keep THREAD_TURNS things *said*; tool runs ride along without spending a slot, or a
+        // busy stretch would push the conversation out of its own window
+        let spoken = 0;
+        for (let i = st.thread.length - 1; i >= 0; i--) {
+          if (st.thread[i].role !== 'tools') spoken++;
+          if (spoken > THREAD_TURNS) { st.thread.splice(0, i + 1); break }
+        }
       }
     }
   }
@@ -224,8 +242,10 @@ function threadOf(pid) {
   const t = transcriptOf(s.sessionId);
   if (!t) return { ok: false, error: 'no transcript yet' };
   usage(t);                                              // make sure the tail is current
-  return { ok: true, name: s.name || String(pid), alive: s.alive, status: s.status,
-           messages: parsed.get(t)?.thread || [] };
+  const st = parsed.get(t);
+  const messages = [...(st?.thread || [])];
+  if (st?.pend?.n) messages.push(toolRun(st.pend));      // working right now, nothing said yet
+  return { ok: true, name: s.name || String(pid), alive: s.alive, status: s.status, messages };
 }
 
 // `kind` records how a session was launched and is never rewritten, so an attached bg

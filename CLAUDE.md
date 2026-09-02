@@ -19,6 +19,10 @@ the other way, or learned something about Claude Code's internals. Skip it for t
 
 - **Zero dependencies.** Two files and Node's stdlib. Don't add a package for what thirty lines
   can do, and don't add a build step.
+- **Nothing in a scrolling flex column may shrink.** Children default to `flex-shrink: 1`, which
+  squashes the shortest items when the column overflows — a 27px line rendered at 11px and looked
+  like a blank strip. Set `flex: none`, and check `scrollHeight > offsetHeight`, not just that an
+  element "is visible".
 - **Never let a selector reach into message content.** `#talklog .m i`, `.q`, `.what .q` — three
   separate bugs where a broad descendant selector styled text a user or agent wrote. Scope rules
   for chrome to a class the chrome owns (`i.hd`), never to a bare tag inside a content block.
