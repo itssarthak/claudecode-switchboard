@@ -4,6 +4,8 @@ A local dashboard for every Claude Code session running on your Mac — what eac
 working on, how many tokens it has burned, how much of your plan is left, and which
 sessions are messaging each other.
 
+![switchboard in action — live sessions, plan usage, costs, agent chatter, and the chat panel](docs/demo.gif)
+
 Not affiliated with Anthropic.
 
 No dependencies, no build step, no telemetry. Two files and Node's stdlib.
