@@ -35,7 +35,7 @@ function transcriptOf(id) {
 const parsed = new Map();
 const blank = () => ({
   off: 0, buf: '', ids: new Set(), recent: [],
-  tok: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, thinking: 0 },
+  tok: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, thinking: 0 }, cost: 0,
   msgs: 0, turns: 0, tools: 0, byTool: {}, sidechain: 0, ctx: 0, daily: {},
   model: null, effort: null, branch: null, lastAt: 0, modelAt: 0,
   summary: null, lastUser: null, lastUserAt: 0, lastAssistant: null, lastTool: null, lastToolAt: 0,
@@ -196,11 +196,14 @@ function ingest(st, e) {
   st.tok.cacheWrite += u.cache_creation_input_tokens || 0;
   st.tok.cacheRead += u.cache_read_input_tokens || 0;
   st.tok.thinking += u.output_tokens_details?.thinking_tokens || 0;  // subset of output
+  const usd = costOf(e.message.model, u);
+  st.cost += usd;
   // context currently in play = what the last request actually carried
   st.ctx = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
   st.recent.push({ ts, out: u.output_tokens || 0 });
   const day = dayKey(ts || Date.now());
-  const d = st.daily[day] ??= { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, msgs: 0 };
+  const d = st.daily[day] ??= { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, msgs: 0, cost: 0 };
+  d.cost = (d.cost || 0) + usd;
   d.input += u.input_tokens || 0; d.output += u.output_tokens || 0;
   d.cacheWrite += u.cache_creation_input_tokens || 0; d.cacheRead += u.cache_read_input_tokens || 0;
   d.msgs++;
@@ -233,7 +236,7 @@ function rollupPass() {
         if (st.msgs) next.sessions++;
         mergePat(pat, st.pat);
         for (const [day, t] of Object.entries(st.daily)) {
-          const acc = days[day] ??= { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, msgs: 0 };
+          const acc = days[day] ??= { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, msgs: 0, cost: 0 };
           for (const k of Object.keys(acc)) acc[k] += t[k] || 0;
         }
       } catch {}
@@ -351,6 +354,46 @@ function cleanTalk(raw) {
 }
 const osaLit = t => t.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 
+// --- API-equivalent cost -----------------------------------------------------------------
+// What the tokens would have cost on the Anthropic API, priced per reply at the model that wrote
+// it. Nobody is charged this - the owner is on a flat subscription - it is a yardstick.
+// $ per million tokens, from Anthropic's published pricing (checked 2026-09-11). Cache writes are
+// 1.25x input for the 5-minute TTL and 2x for 1-hour; Claude Code writes 1-hour, and every write
+// in the transcripts surveyed was 1-hour. Cache reads are 0.1x input, except Fable 5.1 at 0.025x.
+const PRICES = [                                         // matched by prefix, most specific first
+  ['claude-fable-5-1',  { in: 10, out: 50, read: 0.25 }],
+  ['claude-fable-5',    { in: 10, out: 50 }],
+  ['claude-opus-5',     { in: 5,  out: 25 }],
+  ['claude-opus-4-8',   { in: 5,  out: 25 }],
+  ['claude-opus-4-7',   { in: 5,  out: 25 }],
+  ['claude-opus-4-6',   { in: 5,  out: 25 }],
+  ['claude-opus-4-5',   { in: 5,  out: 25 }],
+  ['claude-sonnet-5',   { in: 2,  out: 10 }],
+  ['claude-sonnet-4-6', { in: 3,  out: 15 }],
+  ['claude-sonnet-4-5', { in: 3,  out: 15 }],
+  ['claude-haiku-4-5',  { in: 1,  out: 5 }],
+  ['claude-opus-4-1',   { in: 15, out: 75 }],            // retired, still in old transcripts
+  ['claude-opus-4-2',   { in: 15, out: 75 }],            // Opus 4.0's dated id: claude-opus-4-2025...
+  ['claude-sonnet-4-2', { in: 3,  out: 15 }],            // Sonnet 4.0's dated id
+  ['claude-3-5-haiku',  { in: 0.8, out: 4 }],
+];
+const priceOf = model => PRICES.find(([p]) => String(model || '').startsWith(p))?.[1] || null;
+// one reply's usage record -> dollars. Unknown models (and Claude Code's `<synthetic>` records,
+// which are not API calls) cost nothing rather than a guess.
+function costOf(model, u) {
+  const p = priceOf(model);
+  if (!p || !u) return 0;
+  const cc = u.cache_creation || {};
+  const w1h = cc.ephemeral_1h_input_tokens, w5m = cc.ephemeral_5m_input_tokens;
+  const writes = (w1h != null || w5m != null)
+    ? (w1h || 0) * 2 + (w5m || 0) * 1.25
+    : (u.cache_creation_input_tokens || 0) * 2;          // no breakdown: assume Claude Code's 1h
+  return ((u.input_tokens || 0) * p.in
+        + writes * p.in
+        + (u.cache_read_input_tokens || 0) * (p.read ?? p.in * 0.1)
+        + (u.output_tokens || 0) * p.out) / 1e6;
+}
+
 const RESET_DROP = 5;                                    // percentage points; ignores rounding noise
 const droppedReset = (a, b) =>
   a != null && b != null && b <= a - RESET_DROP;         // pure, so --selftest can exercise it
@@ -430,6 +473,19 @@ if (process.argv[2] === '--patterns') {
   assert.strictEqual(cleanTalk('   ').error, 'empty message');
   assert.ok(cleanTalk('x'.repeat(TALK_MAX + 1)).error.startsWith('too long'));
   assert.strictEqual(cleanTalk('x'.repeat(TALK_MAX)).text.length, TALK_MAX);
+  // API-equivalent pricing: 1M of each token kind on Opus 5, and the two exceptions
+  const M = 1e6, near = (x, y) => Math.abs(x - y) < 1e-9;
+  assert.ok(near(costOf('claude-opus-5', { output_tokens: M }), 25), 'opus 5 output $25/M');
+  assert.ok(near(costOf('claude-opus-5', { cache_read_input_tokens: M }), 0.5), 'cache read 0.1x');
+  assert.ok(near(costOf('claude-opus-5', { cache_creation_input_tokens: M,
+    cache_creation: { ephemeral_1h_input_tokens: M } }), 10), '1h write 2x');
+  assert.ok(near(costOf('claude-opus-5', { cache_creation_input_tokens: M,
+    cache_creation: { ephemeral_5m_input_tokens: M } }), 6.25), '5m write 1.25x');
+  assert.ok(near(costOf('claude-fable-5-1', { cache_read_input_tokens: M }), 0.25), 'fable 5.1 read 0.025x');
+  assert.ok(near(costOf('claude-sonnet-5', { input_tokens: M }), 2), 'sonnet 5 input $2/M');
+  assert.ok(near(costOf('claude-sonnet-4-5-20250929', { input_tokens: M }), 3), 'dated id matches by prefix');
+  assert.strictEqual(costOf('<synthetic>', { output_tokens: M }), 0, 'synthetic records are not API calls');
+
   // the quota window is anchored on an observed restart; a regression here silently inflates
   // every derived number, which is exactly what happened on 2026-09-01
   assert.ok(droppedReset(58, 0), 'a restart is a drop');
@@ -777,7 +833,7 @@ const LEDGER = path.join(DATA, 'ledger.json');
 const PATTERNS = path.join(DATA, 'patterns.json');
 const SAMPLES = path.join(DATA, 'samples.jsonl');
 const SAMPLE_EVERY = 5 * 60e3;
-const FIELDS = ['input', 'output', 'cacheWrite', 'cacheRead', 'msgs'];
+const FIELDS = ['input', 'output', 'cacheWrite', 'cacheRead', 'msgs', 'cost'];
 const totalOf = d => (d.input || 0) + (d.output || 0) + (d.cacheWrite || 0) + (d.cacheRead || 0);
 
 let ledger = { since: null, days: {} };
@@ -793,7 +849,7 @@ function sample() {
   sampledAt = Date.now();
   ledger.since ??= Date.now();
   for (const [day, t] of Object.entries(rollup.days)) {
-    const cur = ledger.days[day] ??= { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, msgs: 0 };
+    const cur = ledger.days[day] ??= { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, msgs: 0, cost: 0 };
     for (const k of FIELDS) cur[k] = Math.max(cur[k] || 0, t[k] || 0);
   }
   // a day only ever gains records, so keep whichever pass saw more of it
@@ -927,6 +983,9 @@ function report() {
       note: pct == null ? (quotaErr || 'no plan percentage recorded yet - cannot derive a budget')
           : live ? null : `percentage is from ${new Date(asOf).toLocaleString()} (${quotaErr})`,
       impliedFullWeek: implied,
+      // whole local days, so it can include a few hours before a mid-day window start
+      costUsd: weekStart ? Object.entries(ledger.days).filter(([d]) => d >= dayKey(weekStart))
+        .reduce((n, [, v]) => n + (v.cost || 0), 0) : null,
       reAnchored: !!reAnchored,
       anchoredAt: reAnchored ? new Date(anchor.at).toISOString() : null,
       anchorBackfilled: !!(reAnchored && anchor.backfilled),

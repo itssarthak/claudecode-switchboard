@@ -660,6 +660,34 @@ polls, and it still follows when already at the bottom.
 **Still asymmetric:** outgoing messages show only as `⚙ 1 tool call · SendMessage`, so you see what
 a session receives but not what it says back to a peer. Offered, not yet built.
 
+## 2026-09-11 — API-equivalent cost (`0.16.0`)
+
+**What:** a dollar figure on every tile, a stat card for today, and a total on the weekly strip —
+what the tokens would have cost on the Anthropic API. Labelled *API-equivalent* everywhere: the
+owner is on a flat subscription and nobody is charged this.
+
+**How:** each reply is priced at the model that wrote it, from its own usage record — `costOf()`
+next to a `PRICES` table matched by model-id prefix, so dated ids like `claude-sonnet-4-5-20250929`
+resolve. Cache writes use the TTL breakdown in `usage.cache_creation` (1h = 2x input, 5m = 1.25x);
+every write in 23,436 surveyed records was 1-hour. Cache reads are 0.1x input, except Fable 5.1 at
+0.025x. `<synthetic>` records and unknown models cost nothing rather than a guess. Cost flows
+through `st.daily` → rollup → ledger like the token counts, so the week total is a sum of ledger
+days from the window start (whole local days — it can include a few hours before a mid-day start).
+
+**Rates are from Anthropic's published pricing page, checked 2026-09-11, not from memory.** Sonnet
+4.5 was not in the bundled table and was confirmed on the live page ($3/$15). No model in these
+transcripts carries a long-context premium: 4.6+ bills the full 1M window at standard rates.
+
+**Verified:** eight `--selftest` assertions pin the arithmetic (each token kind on Opus 5, both
+cache-write TTLs, Fable 5.1's read rate, prefix matching on a dated id, `<synthetic>` = $0). An
+independent recomputation of today straight from the transcripts gave **$83.27** against the
+server's **$82.74** — the gap is activity that landed between the two reads.
+
+**The trap met on the way:** the first check showed $0 and no `cost` field at all. The `/switchboard`
+command had started a copy from the *plugin cache* path, which held 7823, so the freshly edited
+server silently walked to 7824 — and `pgrep -f 'node claude-sessions.js'` does not match the
+full-path command, so it was never killed. The dashboard being tested was yesterday's code.
+
 ---
 
 ## Standing notes for whoever works here next

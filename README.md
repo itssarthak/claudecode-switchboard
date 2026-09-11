@@ -57,6 +57,9 @@ sorted by tokens burned.
   `DAYS` days (default 7).
 - **Live plan usage** — your actual 5-hour and weekly limits as percentages, with reset
   times. See [Plan usage](#plan-usage) for how this works.
+- **API-equivalent cost** — what your tokens would have cost on the Anthropic API at current list
+  prices, per session, for today, and for the quota window. Each reply is priced at the model that
+  wrote it. It is a yardstick: on a subscription you are not charged this.
 - **Derived weekly budget** — what 100% is *in tokens*, how much is left, your run rate per
   day, and whether you'll run dry before the reset. The rate that would land exactly on the reset
   shows as `target N/day` under *all tokens today*. See [Weekly budget](#weekly-budget).

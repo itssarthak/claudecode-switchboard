@@ -408,6 +408,8 @@ function md(raw) {
 }
 const tilde = p => (p || '').replace(/^\/Users\/[^/]+/, '~');
 const label = p => tilde(p).split('/').filter(Boolean).pop() || '~';
+// API-equivalent dollars: what the API would have charged, not what anyone is charged
+const usd = n => n == null ? '—' : n >= 100 ? '$' + Math.round(n).toLocaleString() : '$' + n.toFixed(2);
 const k = n => !n ? '0' : n < 1e3 ? String(n) : n < 1e6 ? (n / 1e3).toFixed(n < 1e4 ? 1 : 0) + 'k'
                                               : n < 1e9 ? (n / 1e6).toFixed(n < 1e7 ? 2 : 1) + 'M'
                                               : (n / 1e9).toFixed(2) + 'B';
@@ -568,6 +570,7 @@ function renderBudget(b) {
     <span><b>${k(w.tokensUsed)}</b> <i>used (${w.percentUsed}%)</i></span>
     <span><b>${k(w.tokensRemaining)}</b> <i>left</i></span>
     <span><b>${k(w.runRatePerDay)}</b><i>/day run rate</i></span>
+    ${w.costUsd != null ? `<span title="what this window would have cost on the Anthropic API at current list prices - you pay a flat subscription, not this"><b>${usd(w.costUsd)}</b> <i>API-equivalent</i></span>` : ''}
     <span><b>${k(w.projectedFullWeek)}</b> <i>projected =</i> <b class="${over ? 'over' : 'under'}">${w.projectedPercent}%</b></span>
     ${out ? `<span class="${over ? 'over' : 'under'}">${over ? `runs out ${short(out)}` : `resets first ${short(reset)}`}</span>
              <i>${gap != null ? `${gap < 24 ? Math.round(gap) + 'h' : Math.round(gap / 24) + 'd'} ${over ? 'before reset' : 'to spare'}` : ''}</i>` : ''}
@@ -675,6 +678,7 @@ function tile(r) {
     <dl>
       ${row('burning (5m)', k(u.burn))}
       ${row('<b>all tokens</b>', '<b>' + k(u.total) + '</b>')}
+      ${row('<span title="what these tokens would cost on the Anthropic API at current list prices - you pay a flat subscription, not this">API-equivalent</span>', usd(u.cost))}
     </dl>
     <details class=more ${openTiles.has(String(id)) ? 'open' : ''}>
       <summary>breakdown</summary>
@@ -926,6 +930,9 @@ async function tick() {
            + `left of the week divided by the time left before the reset - spend that per day and `
            + `the quota runs out exactly as the week does.`),
       sug ? `target ${k(sug)}/day` : '', todayCls],
+    [usd(today.cost || 0), 'API-equivalent today',
+      'what today would have cost on the Anthropic API at current list prices, each reply priced '
+      + 'at the model that wrote it. You pay a flat subscription - nobody is charged this.'],
     [rollup.scanning ? `${rollup.done}/${rollup.files}` : String(rollup.sessions),
       rollup.scanning ? 'scanning…' : 'transcripts read',
       rollup.scanning ? 'reading every transcript once' : `updated ${new Date(rollup.at).toLocaleTimeString()}`],
