@@ -789,7 +789,7 @@ async function renderSpend() {
   // dollars only where the day was priced; a blank beats a $0 that means "not measured"
   const dayCost = new Map(days.map(d => [d.date, d.cost]));
   const weekCost = new Map((r.weekly || []).map(w => [w.from, w.cost]));
-  const money = m => key => m.get(key) == null ? '' : usd(m.get(key));
+  const money = m => key => !m.get(key) ? '' : usd(m.get(key));   // blank on idle days, like the token column
   const allPriced = days.every(d => d.cost != null);
   box.querySelector('summary small').textContent =
     `${k(total)} over ${r.days.length} days · ${k(Math.round(total / r.days.length))}/day average`
