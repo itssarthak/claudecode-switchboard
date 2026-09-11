@@ -232,6 +232,9 @@
   .brow .t { height: .52rem; border-radius: .26rem; background: var(--line) }
   .brow .t > b { display: block; height: 100%; border-radius: .26rem; background: #4c9a5a }
   .brow .n { text-align: right; font-variant-numeric: tabular-nums; color: var(--dim) }
+  .costs .brow { grid-template-columns: var(--lab, 3.1rem) 1fr 3.2rem 4rem }
+  .brow .usd { text-align: right; font-variant-numeric: tabular-nums; color: var(--dim); font-size: .92em }
+  .costs h3 small { font-weight: 400; color: var(--dim); margin-left: .4rem }
   .brow.peak .t > b { background: #d99a45 }
   .brow.part .t > b { opacity: .45 }
   .chips { display: flex; flex-wrap: wrap; gap: .35rem }
@@ -729,14 +732,15 @@ function renderQuota(q) {
 }
 
 // --- usage patterns: slow-moving, so on its own 60s cycle rather than the 2s poll --------
-const bars = (pairs, fmt = k => k, vfmt = k2, mark = () => null) => {
+// `extra` adds a fourth column per row - only the spend cards use it, for dollars
+const bars = (pairs, fmt = k => k, vfmt = k2, mark = () => null, extra = null) => {
   const max = Math.max(...pairs.map(p => p[1]), 1);
   return pairs.map(([k, v]) => {
     const m = mark(k);                                        // [extraClass, tooltip] or null
     return `<div class="brow ${v === max ? 'peak' : ''} ${m?.[0] || ''}" title="${esc(m?.[1] || '')}">
       <i>${esc(fmt(k))}</i>
       <span class=t><b style="width:${v / max * 100}%"></b></span>
-      <span class=n>${v ? vfmt(v) : ''}</span></div>`;
+      <span class=n>${v ? vfmt(v) : ''}</span>${extra ? `<span class=usd>${extra(k)}</span>` : ''}</div>`;
   }).join('');
 };
 const k2 = n => n < 1000 ? String(n) : (n / 1000).toFixed(1) + 'k';
@@ -782,17 +786,24 @@ async function renderSpend() {
   const days = r.days.slice(0, 30).reverse();                  // oldest -> newest
   const partial = new Set(days.filter(d => d.partial).map(d => d.date));
   const total = r.days.reduce((n, d) => n + d.total, 0);
+  // dollars only where the day was priced; a blank beats a $0 that means "not measured"
+  const dayCost = new Map(days.map(d => [d.date, d.cost]));
+  const weekCost = new Map((r.weekly || []).map(w => [w.from, w.cost]));
+  const money = m => key => m.get(key) == null ? '' : usd(m.get(key));
+  const allPriced = days.every(d => d.cost != null);
   box.querySelector('summary small').textContent =
-    `${k(total)} over ${r.days.length} days · ${k(Math.round(total / r.days.length))}/day average`;
+    `${k(total)} over ${r.days.length} days · ${k(Math.round(total / r.days.length))}/day average`
+    + (allPriced ? ` · ${usd(days.reduce((n, d) => n + d.cost, 0))} API-equivalent over the last ${days.length}` : '');
 
   const dayRows = bars(days.map(d => [d.date, d.total]), s => s.slice(5), k,
-    s => partial.has(s) ? ['part', 'partial — predates the ledger, so it may undercount'] : null);
+    s => partial.has(s) ? ['part', 'partial — predates the ledger, so it may undercount'] : null,
+    money(dayCost));
   const weekRows = bars((r.weekly || []).slice().reverse().map(w => [w.from, w.used]), s => s.slice(5), k,
-    s => [null, `week of ${s}`]);
+    s => [null, `week of ${s}`], money(weekCost));
 
   box.querySelector('.hgrid').innerHTML = `
-    <div class="hcard wide"><h3>per day — last ${days.length}</h3>${dayRows}</div>
-    ${weekRows ? `<div class="hcard wide"><h3>per quota week</h3>${weekRows}</div>` : ''}`;
+    <div class="hcard wide costs"><h3>per day — last ${days.length} <small>tokens · API-equivalent</small></h3>${dayRows}</div>
+    ${weekRows ? `<div class="hcard wide costs"><h3>per quota week <small>tokens · API-equivalent</small></h3>${weekRows}</div>` : ''}`;
 }
 renderSpend();
 setInterval(renderSpend, 60e3);

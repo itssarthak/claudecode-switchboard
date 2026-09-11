@@ -215,9 +215,14 @@ function ingest(st, e) {
 const DAYS = Number(process.env.DAYS) || 7;
 let rollup = { days: {}, files: 0, sessions: 0, scanning: true, done: 0, at: 0 };
 
-function rollupPass() {
+// Cost arrived after the ledger already held weeks of days, and the normal pass only rereads the
+// last DAYS days - so older days would stay unpriced forever. The first pass after startup reaches
+// back BACKFILL_DAYS instead, and is written to the ledger the moment it finishes (sample() keeps the
+// larger value per field, so it only ever adds what was missing).
+const BACKFILL_DAYS = 31;
+function rollupPass(window = DAYS, onDone = null) {
   if (!fs.existsSync(PROJECTS)) return;
-  const cutoff = Date.now() - DAYS * 864e5;
+  const cutoff = Date.now() - window * 864e5;
   const files = [];
   for (const d of fs.readdirSync(PROJECTS, { withFileTypes: true }).filter(d => d.isDirectory()))
     for (const f of fs.readdirSync(path.join(PROJECTS, d.name)))
@@ -244,9 +249,10 @@ function rollupPass() {
     next.done = i;
     rollup = { ...next, scanning: i < files.length };
     if (i < files.length) setImmediate(step);
+    else if (onDone) onDone();
   })();
 }
-setTimeout(rollupPass, 200);
+setTimeout(() => rollupPass(BACKFILL_DAYS, () => sample()), 200);
 setInterval(rollupPass, 60e3);
 
 // the conversation tail for one session, fetched on demand rather than pushed to every poll
@@ -965,10 +971,12 @@ function report() {
     const first = Date.parse(dates[0] + 'T00:00:00');
     for (let a = weekStart; a + 7 * 864e5 > first; a -= 7 * 864e5) {
       const from = dayKey(a), to = dayKey(a + 7 * 864e5 - 1);
-      let used = 0, n = 0;
+      let used = 0, n = 0, cost = 0, priced = 0;
       for (const [d, v] of Object.entries(ledger.days))
-        if (d >= from && d <= to) { used += totalOf(v); n++ }
-      if (n) weekly.push({ from, to, used, days: n, current: a === weekStart });
+        if (d >= from && d <= to) { used += totalOf(v); n++; if (v.cost != null) { cost += v.cost; priced++ } }
+      // a week only has a dollar figure if every day in it was priced; half a week reads as cheap
+      if (n) weekly.push({ from, to, used, days: n, current: a === weekStart,
+                           cost: priced === n ? cost : null });
     }
   }
 

@@ -688,6 +688,25 @@ command had started a copy from the *plugin cache* path, which held 7823, so the
 server silently walked to 7824 — and `pgrep -f 'node claude-sessions.js'` does not match the
 full-path command, so it was never killed. The dashboard being tested was yesterday's code.
 
+## 2026-09-11 — Dollars in "Tokens spent", with a backfill (`0.16.1`)
+
+**What:** every day and every quota week in the *Tokens spent* section now carries its
+API-equivalent dollar figure beside the token total, and the summary line gains a 30-day total.
+
+**The backfill was the real work.** Cost only started being recorded today, while the ledger already
+held a month of days — and the normal rollup rereads just the last 7 days of transcripts, so older
+days would have stayed unpriced forever. The first pass after startup now reaches back 31 days and
+is written to the ledger the moment it finishes; `sample()` keeps the larger value per field, so it
+only ever adds what was missing. Verified on a dev port: 1,250 files read, **30 of 30 days priced**,
+every quota week priced.
+
+**Blank over zero.** A day with no cost record shows nothing rather than `$0`, and a week only gets
+a figure if every one of its days was priced — half a week priced would read as a cheap week. The
+30-day summary total appears only when all 30 days are priced, for the same reason.
+
+**Kept `bars()` shared.** The per-row dollars are an optional trailing column only the spend cards
+pass in; the habits cards are untouched.
+
 ---
 
 ## Standing notes for whoever works here next
