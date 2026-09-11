@@ -400,6 +400,34 @@ function costOf(model, u) {
         + (u.output_tokens || 0) * p.out) / 1e6;
 }
 
+// A young window cannot measure its own size: at 2% reported, used / pct is dominated by rounding
+// and by Anthropic weighting token types differently from our raw count - on 2026-09-11 it read
+// 1.26B an hour after a reset, against a real ~2.4B. The window before is the best predictor: its
+// measured tokens over its final reported percentage. Measured from whole ledger days - coarse at
+// the edges, but immune to ledger backfills, which move sample totals and so inflate any
+// sample-to-sample difference (the 31-day backfill added 1.28B to the totals mid-window that day).
+function priorWindow(samples, days) {
+  const pts = samples.filter(x => x.week != null);
+  const drops = [];
+  for (let i = 1; i < pts.length; i++) if (droppedReset(pts[i - 1].week, pts[i].week)) drops.push(i);
+  if (drops.length < 2) return null;
+  const start = pts[drops[drops.length - 2]], last = pts[drops[drops.length - 1] - 1];
+  if (!last.week) return null;
+  const d0 = dayKey(start.t), d1 = dayKey(last.t);
+  let used = 0;
+  for (const [d, v] of Object.entries(days)) if (d >= d0 && d <= d1)
+    used += (v.input || 0) + (v.output || 0) + (v.cacheWrite || 0) + (v.cacheRead || 0);
+  return used ? { implied: Math.round(used / (last.week / 100)), from: start.t, to: last.t, pct: last.week } : null;
+}
+// tokens over the trailing 24h from whole-day ledger totals: a run rate that means something an
+// hour into a window, where "used so far / time so far" extrapolates one burst to a week
+function trailingRate(days, now) {
+  const today = dayKey(now), yest = dayKey(now - 864e5);
+  const into = Math.min(1, Math.max(0, (now - Date.parse(today + 'T00:00:00')) / 864e5));
+  const t = d => { const v = days[d] || {}; return (v.input || 0) + (v.output || 0) + (v.cacheWrite || 0) + (v.cacheRead || 0) };
+  return t(today) + t(yest) * (1 - into);
+}
+
 const RESET_DROP = 5;                                    // percentage points; ignores rounding noise
 const droppedReset = (a, b) =>
   a != null && b != null && b <= a - RESET_DROP;         // pure, so --selftest can exercise it
@@ -491,6 +519,20 @@ if (process.argv[2] === '--patterns') {
   assert.ok(near(costOf('claude-sonnet-5', { input_tokens: M }), 2), 'sonnet 5 input $2/M');
   assert.ok(near(costOf('claude-sonnet-4-5-20250929', { input_tokens: M }), 3), 'dated id matches by prefix');
   assert.strictEqual(costOf('<synthetic>', { output_tokens: M }), 0, 'synthetic records are not API calls');
+
+  // young-window estimate: prior window = its ledger days over its final percentage
+  { const T = (d, h) => new Date(2026, 0, d, h).getTime();
+    const smp = [{ t: T(1, 9), week: 60 }, { t: T(1, 10), week: 1 },     // restart -> prior window opens
+                 { t: T(2, 12), week: 40 }, { t: T(3, 18), week: 80 },   // prior window ends at 80%
+                 { t: T(3, 19), week: 0 }, { t: T(3, 20), week: 2 }];    // restart -> current window
+    const dd = { [dayKey(T(1, 12))]: { input: 100 }, [dayKey(T(2, 12))]: { output: 200 },
+                 [dayKey(T(3, 12))]: { cacheRead: 100 }, [dayKey(T(4, 12))]: { input: 999 } };
+    const pw = priorWindow(smp, dd);
+    assert.strictEqual(pw.implied, 500, 'prior window: 400 tokens at 80% is 500');
+    assert.strictEqual(priorWindow(smp.slice(0, 4), dd), null, 'one restart is not enough history');
+    const half = new Date(2026, 0, 3, 12).getTime();
+    assert.strictEqual(Math.round(trailingRate({ [dayKey(half)]: { input: 50 }, [dayKey(half - 864e5)]: { input: 200 } }, half)),
+                       150, 'trailing 24h at noon: all of today + half of yesterday'); }
 
   // the quota window is anchored on an observed restart; a regression here silently inflates
   // every derived number, which is exactly what happened on 2026-09-01
@@ -939,13 +981,19 @@ function report() {
   // Early in a window the percentage is a small integer, so one point of rounding moves the answer
   // a long way: at 3%, +/- 0.5 is +/- 17%. Still worth showing - it is the only estimate there is -
   // but flagged, so nobody plans against a number that could move by a fifth on the next poll.
-  const PCT_FLOOR = 5;
-  const provisional = pct != null && pct > 0 && pct < PCT_FLOOR;
+  const PCT_FLOOR = 5, CARRY_UNTIL = 15;
+  const liveImplied = (weekUsed && pct) ? Math.round(weekUsed / (pct / 100)) : null;
+  // below CARRY_UNTIL the live figure is noise (see priorWindow) - use last window's instead
+  const prior = pct != null && pct < CARRY_UNTIL ? priorWindow(samples, ledger.days) : null;
+  const implied = prior ? prior.implied : liveImplied;
+  const provisional = !prior && pct != null && pct > 0 && pct < PCT_FLOOR;
   const swing = provisional ? Math.round(0.5 / pct * 100) : 0;
-  const implied = (weekUsed && pct) ? Math.round(weekUsed / (pct / 100)) : null;
   const elapsed = weekStart ? (asOf - weekStart) / 864e5 : null;
-  const rate = (weekUsed && elapsed > 0) ? weekUsed / elapsed : null;
-  const projected = rate ? Math.round(rate * 7) : null;
+  const rate = elapsed >= 1 ? (weekUsed ? weekUsed / elapsed : null)
+             : (trailingRate(ledger.days, asOf) || (weekUsed && elapsed > 0 ? weekUsed / elapsed : null));
+  // to the actual reset, not a fixed 7 days: re-anchored windows are not seven days long
+  const daysLeft = resets ? Math.max(0, (resets - asOf) / 864e5) : null;
+  const projected = rate ? Math.round(daysLeft != null ? (weekUsed || 0) + rate * daysLeft : rate * 7) : null;
 
   const days = Object.entries(ledger.days).sort((a, b) => b[0].localeCompare(a[0])).map(([date, d]) => ({
     date, ...d, total: totalOf(d),
@@ -997,7 +1045,9 @@ function report() {
       reAnchored: !!reAnchored,
       anchoredAt: reAnchored ? new Date(anchor.at).toISOString() : null,
       anchorBackfilled: !!(reAnchored && anchor.backfilled),
-      provisional, swingPct: swing,
+      provisional, swingPct: swing, liveImplied, carryUntil: CARRY_UNTIL,
+      carried: prior ? { implied: prior.implied, pct: prior.pct,
+                         from: new Date(prior.from).toISOString(), to: new Date(prior.to).toISOString() } : null,
       tokensRemaining: implied && weekUsed != null ? implied - weekUsed : null,
       runRatePerDay: rate ? Math.round(rate) : null,
       // what is left, spread evenly over the time still on the clock: spend at this rate and the
@@ -1007,7 +1057,7 @@ function report() {
         ? Math.max(0, Math.round((implied - weekUsed) / ((resets - now) / 864e5))) : null,
       projectedFullWeek: projected,
       projectedPercent: (projected && implied) ? Math.round(projected / implied * 100) : null,
-      exhaustedAt: (rate && implied) ? new Date(weekStart + implied / rate * 864e5).toISOString() : null,
+      exhaustedAt: (rate && implied) ? new Date(asOf + Math.max(0, implied - (weekUsed || 0)) / rate * 864e5).toISOString() : null,
     },
     days, weeks,
     since: ledger.since && new Date(ledger.since).toISOString(),

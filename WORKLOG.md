@@ -707,6 +707,31 @@ a figure if every one of its days was priced — half a week priced would read a
 **Kept `bars()` shared.** The per-row dollars are an optional trailing column only the spend cards
 pass in; the habits cards are untouched.
 
+## 2026-09-11 — The budget after a reset (`0.16.3`)
+
+**What:** an hour after the weekly reset the strip read `100% ≈ 1.26B`, `projected = 233%`, and a
+daily target of 178M. The real window is about 2.4B. Now it reads 2.46B, 84%, and 349M.
+
+**Why it was wrong:** `used / pct` at 2% reported is not a measurement. Rounding alone is ±25%, and
+worse, Anthropic's percentage weights token types while we count raw tokens — early in a window
+the mix is lopsided, so the ratio is off by far more than rounding. The live figure moved from
+1.26B to 2.28B within one hour. The run rate had the same flaw: 25M over 90 minutes, stretched to
+a week, gave 418M/day and a 233% projection.
+
+**Fix:** below 15% reported, size the window from the one before it (`priorWindow()`): its
+tokens over its final percentage, found from the recorded restarts. The run rate comes from the
+trailing 24 hours of the ledger until the window is a day old (`trailingRate()`). The projection
+now runs to the actual reset instead of assuming 7 days — re-anchored windows are not seven days
+long — and "runs out" is measured from now, not from the window start. The strip says where the
+number came from and when it switches over. Three selftest assertions pin both helpers.
+
+**A mistake of mine this surfaced.** The 31-day cost backfill (`0.16.1`) raised the ledger's
+totals by **1.28B** at 12:53, and `weekUsed` is a difference of sample totals — so the last 40
+minutes of the previous window counted a month of old days as that week's usage. It showed
+`3.68B` where the window was really ~2.44B. The backfill only adds missing values, so it cannot
+jump again, and the new window opened after it. `priorWindow()` sums ledger days rather than
+sample totals partly for this reason: day totals are not moved by a backfill of other days.
+
 ---
 
 ## Standing notes for whoever works here next

@@ -577,6 +577,9 @@ function renderBudget(b) {
     <span><b>${k(w.projectedFullWeek)}</b> <i>projected =</i> <b class="${over ? 'over' : 'under'}">${w.projectedPercent}%</b></span>
     ${out ? `<span class="${over ? 'over' : 'under'}">${over ? `runs out ${short(out)}` : `resets first ${short(reset)}`}</span>
              <i>${gap != null ? `${gap < 24 ? Math.round(gap) + 'h' : Math.round(gap / 24) + 'd'} ${over ? 'before reset' : 'to spare'}` : ''}</i>` : ''}
+    ${w.carried ? `<span class=cav title="this window's own figure right now: ${esc(k(w.liveImplied))}"><b>estimated from last window</b>
+      — it measured ${k(w.carried.implied)} at ${w.carried.pct}%. Only ${w.percentUsed}% of this one is reported so far,
+      too little to size it; switches to this window's own figure at ${w.carryUntil}%.</span>` : ''}
     ${w.provisional ? `<span class=cav><b class=over>provisional</b> — only ${w.percentUsed}% reported
       so far, so this could move by about ±${w.swingPct}% on the next poll.</span>` : ''}
     ${w.reAnchored ? `<span class=cav>counting from ${new Date(w.anchoredAt).toLocaleString()}, when
