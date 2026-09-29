@@ -507,6 +507,9 @@ if (process.argv[2] === '--patterns') {
   assert.strictEqual(cleanTalk('   ').error, 'empty message');
   assert.ok(cleanTalk('x'.repeat(TALK_MAX + 1)).error.startsWith('too long'));
   assert.strictEqual(cleanTalk('x'.repeat(TALK_MAX)).text.length, TALK_MAX);
+  // /reopen puts a recorded cwd into a shell command: it must stay one quoted word
+  assert.strictEqual(shq("/a b/it's; rm -rf ~"), `'/a b/it'\\''s; rm -rf ~'`);
+  assert.strictEqual(execFileSync('sh', ['-c', `printf %s ${shq("x'; echo pwned")}`]).toString(), "x'; echo pwned");
   // API-equivalent pricing: 1M of each token kind on Opus 5, and the two exceptions
   const M = 1e6, near = (x, y) => Math.abs(x - y) < 1e-9;
   assert.ok(near(costOf('claude-opus-5', { output_tokens: M }), 25), 'opus 5 output $25/M');
@@ -776,6 +779,71 @@ function awaitList(sessions) {
     return { ...a, name: s.name || a.name, alive: !!s.alive, status: s.status || null };
   }).sort((x, y) => x.at - y.at);
 }
+
+// --- reopen after a restart -------------------------------------------------------------
+// A reboot takes every session down and the registry files with them. So the terminal sessions
+// that are open get written down as they change; if the Mac has booted since that list was
+// written, whatever on it isn't running again is offered back, ticked, until reopened or dismissed.
+const OPENFILE = path.join(DATA, 'open-sessions.json');
+const RESTOREFILE = path.join(DATA, 'restore.json');
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const readJson = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')) } catch { return d } };
+const writeJson = (f, v) => { try { fs.mkdirSync(DATA, { recursive: true }); fs.writeFileSync(f, JSON.stringify(v)) } catch {} };
+const bootedAt = () => {
+  try { return Number(execFileSync('sysctl', ['-n', 'kern.boottime']).toString().match(/sec = (\d+)/)[1]) * 1000 }
+  catch { return 0 }
+};
+// A shutdown kills the sessions seconds before it kills this server, which then saw nothing open
+// and wrote an empty list over the real one - so the first reboot offered nothing back. A session
+// that disappears now stays listed for OPEN_GRACE: a shutdown can't wipe it, and one you closed
+// well before a restart has aged out and is not offered.
+const OPEN_GRACE = 2 * 60e3;
+let restore = readJson(RESTOREFILE, []), recent = null;
+function trackOpen(sessions, now = Date.now(), boot = bootedAt) {
+  const open = sessions.filter(s => s.alive && s.entrypoint === 'cli' && !s.headless && UUID.test(s.sessionId))
+    .map(s => ({ sessionId: s.sessionId, cwd: s.cwd, name: s.name || null, seen: now }));
+  if (!recent) {                                     // first scan after startup, before overwriting
+    const prev = readJson(OPENFILE, null);
+    recent = new Map((prev?.sessions || []).map(s => [s.sessionId, s]));
+    if (prev?.at < boot()) {                          // the Mac restarted since: offer them back
+      const up = new Set(open.map(s => s.sessionId)), have = new Set(restore.map(s => s.sessionId));
+      restore.push(...prev.sessions.filter(s => !up.has(s.sessionId) && !have.has(s.sessionId)));
+      writeJson(RESTOREFILE, restore);
+      recent.clear();
+    }
+  }
+  for (const s of open) recent.set(s.sessionId, s);
+  for (const [id, s] of recent) if (!(now - s.seen < OPEN_GRACE)) recent.delete(id);
+  writeJson(OPENFILE, { at: now, sessions: [...recent.values()] });
+}
+// A new iTerm2 tab running `claude --resume`. Only ids on the restore list, so this endpoint
+// can't be used to run anything else; the command goes to osascript as an argument, not spliced
+// into the script, and the cwd is shell-quoted.
+function shq(s) { return `'${String(s).replace(/'/g, `'\\''`)}'` }
+const NEW_TAB = `on run argv
+  tell application "iTerm2"
+    activate
+    if (count of windows) = 0 then
+      create window with default profile
+    else
+      tell current window to create tab with default profile
+    end if
+    tell current session of current window to write text (item 1 of argv)
+  end tell
+end run`;
+function reopen(ids) {
+  const want = new Set(Array.isArray(ids) ? ids : []), done = [], failed = [];
+  for (const s of restore.filter(s => want.has(s.sessionId) && UUID.test(s.sessionId))) {
+    try {
+      execFileSync('osascript', ['-e', NEW_TAB, `cd ${shq(s.cwd || HOME)} && claude --resume ${s.sessionId}`], { timeout: 10e3 });
+      done.push(s.sessionId);
+    } catch (e) { failed.push({ name: s.name, error: String(e.stderr || e.message).slice(0, 200) }) }
+  }
+  restore = restore.filter(s => !done.includes(s.sessionId));
+  writeJson(RESTOREFILE, restore);
+  return { ok: !failed.length, reopened: done.length, failed };
+}
+const dismissRestore = () => { restore = []; writeJson(RESTOREFILE, restore); return { ok: true } };
 
 const QCACHE = path.join(DATA, 'quota-cache.json');
 const QUOTA_EVERY = 5 * 60e3;
@@ -1184,7 +1252,8 @@ const server = http.createServer((req, res) => {
   const killPid = req.url.match(/^\/kill\?pid=(\d+)$/);
   const awaitPid = req.url.match(/^\/await\?pid=(\d+)$/);
   const selfPost = req.url.startsWith('/self') && req.method === 'POST';
-  if ((sendCmd || talkPid || focusPid || killPid || selfPost || awaitPid) && !(sameOrigin(req) && req.method === 'POST')) {
+  const restoreReq = req.url === '/reopen' || req.url === '/reopen/dismiss';
+  if ((sendCmd || talkPid || focusPid || killPid || selfPost || awaitPid || restoreReq) && !(sameOrigin(req) && req.method === 'POST')) {
     res.writeHead(403, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     return res.end(JSON.stringify({ ok: false, error: 'cross-origin or non-POST request refused' }));
   }
@@ -1199,6 +1268,17 @@ const server = http.createServer((req, res) => {
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       res.end(JSON.stringify(r));
     });
+  } else if (req.url === '/reopen') {
+    body(req).then(
+      t => reopen(JSON.parse(t).ids),
+      e => ({ ok: false, error: String(e.message || e) }),
+    ).catch(e => ({ ok: false, error: String(e.message || e) })).then(r => {
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      res.end(JSON.stringify(r));
+    });
+  } else if (req.url === '/reopen/dismiss') {
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+    res.end(JSON.stringify(dismissRestore()));
   } else if (focusPid) {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify(focus(Number(focusPid[1]))));
@@ -1242,7 +1322,7 @@ const server = http.createServer((req, res) => {
   } else if (req.url === '/api') {
     const sess = correlate(scan());
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-    res.end(JSON.stringify({ sessions: sess, awaiting: awaitList(sess), rollup, quota: quota(), budget: budget(), idleNotifMs: idleNotifMs(), defaultModel: defaultModel(), now: Date.now() }));
+    res.end(JSON.stringify({ sessions: sess, awaiting: awaitList(sess), restore, rollup, quota: quota(), budget: budget(), idleNotifMs: idleNotifMs(), defaultModel: defaultModel(), now: Date.now() }));
   } else {
     res.writeHead(200, { 'content-type': 'text/html', 'cache-control': 'no-store' });
     fs.createReadStream(path.join(__dirname, 'claude-sessions.html')).pipe(res);
@@ -1259,4 +1339,6 @@ if (!String(process.argv[2] || '').startsWith('--'))    // --report / --selftest
     // the port walks upward if 7823 is taken, so record it - the MCP server has to find us
     try { fs.mkdirSync(DATA, { recursive: true }); fs.writeFileSync(path.join(DATA, 'port'), String(port)) } catch {}
     console.log(`http://localhost:${port}`);
+    const track = () => { try { trackOpen(scan()) } catch {} };   // page open or not
+    track(); setInterval(track, 10e3);
   });

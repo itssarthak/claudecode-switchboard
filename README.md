@@ -163,6 +163,13 @@ running is recovered from the 5-minute samples in `samples.jsonl`.
 While the reported percentage is still low, the estimate is marked **provisional** with its
 arithmetic swing — at 3%, half a point of rounding is ±17%.
 
+### Reopening sessions after a restart
+
+While switchboard runs it keeps a list of your open terminal sessions. Start it after a reboot and
+the top of the page shows the ones that were open, ticked; **reopen in iTerm2** opens a tab per
+session running `claude --resume` in its folder. It only knows what it saw, so it has to have been
+running before the restart.
+
 ## Requirements
 
 - **macOS.** Terminal focus and `/compact` use AppleScript, plan usage reads the
@@ -188,6 +195,8 @@ Everything lands in `~/.switchboard/` — nothing is written near the repo.
 | `ledger.json` | Cumulative tokens per local calendar day. Values only ratchet up. |
 | `samples.jsonl` | A row every 5 minutes pairing token totals with your plan percentage. ~26 KB/day, trimmed to 120 days. |
 | `quota-cache.json` | The last plan-usage response, so restarts don't re-hit the API. **Contains no credentials** — just the usage payload. |
+| `open-sessions.json` | The terminal sessions open right now (id, folder, name), kept 2 minutes after one closes so a shutdown can't wipe it. |
+| `restore.json` | Sessions that were open when the Mac went down, until you reopen or dismiss them. |
 | `patterns.json` | Per-day prompt counts by hour and weekday, tool/model/effort tallies, prompt lengths, interruption counts. No prompt text is stored. |
 
 Delete the directory at any time; it rebuilds. You lose the day-by-day history, which cannot
@@ -428,6 +437,8 @@ rules.
 | `POST /await?pid=` | The same, over HTTP; the text rides in the body. |
 | `POST /self?pid=&cmd=` | Run an allowlisted command on the caller's *own* session. |
 | `POST /kill?pid=` | SIGTERM that session. |
+| `POST /reopen` | Resume the listed ids (JSON body `{ids}`) in new iTerm2 tabs. Only ids on the restore list. |
+| `POST /reopen/dismiss` | Clear the restore list. |
 
 ## License
 

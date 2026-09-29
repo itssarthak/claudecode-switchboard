@@ -732,6 +732,32 @@ minutes of the previous window counted a month of old days as that week's usage.
 jump again, and the new window opened after it. `priorWindow()` sums ledger days rather than
 sample totals partly for this reason: day totals are not moved by a backfill of other days.
 
+## 2026-09-29 — Reopen sessions after a restart (branch `restore-sessions`, not shipped)
+
+**What:** the server writes the open terminal sessions to `~/.switchboard/open-sessions.json` every
+10s (page open or not). On startup, if the Mac has booted since that was written, the ones not
+running again go to `restore.json` and the page shows them ticked with "reopen in iTerm2", which
+opens a tab per session running `cd <cwd> && claude --resume <id>`. A Desktop `Switchboard.app`
+(osacompile, no Terminal window) starts the server and opens the page.
+
+**Why:** a reboot deletes `~/.claude/sessions/*.json`, so the open set has to be written down
+before it happens. Boot time (`sysctl kern.boottime`) separates "machine restarted" from
+"switchboard restarted", so closing a session normally never offers it back.
+
+**Verified:** fake pre-boot list under a scratch `HOME`: panel rendered, an unticked box survived
+two `tick()` polls, reopen opened a tab in a dir named `it's dir` and ran the resume, dismiss
+cleared it, cross-origin POST refused. `shq` quoting is pinned in `--selftest`.
+
+**First real reboot offered nothing.** `restore.json` was written `[]` at startup: macOS killed the
+sessions seconds before the server, whose next 10s scan saw none open and overwrote the list with
+an empty one. Now a vanished session stays listed for 2 minutes (`OPEN_GRACE`). Checked by running
+`trackOpen` with a fake clock: shutdown-write keeps it, reboot offers it, a session closed 5 min
+before the reboot is not offered. Then confirmed by the owner across a real reboot (2026-09-29).
+
+**Rejected:** a login item (owner prefers double-clicking); manual "save before restart" scripts
+(forgetting to click loses everything). `/reopen` takes only ids already on the restore list, so
+it can't be used to run arbitrary commands.
+
 ---
 
 ## Standing notes for whoever works here next
