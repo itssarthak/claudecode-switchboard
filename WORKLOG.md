@@ -778,7 +778,7 @@ it can't be used to run arbitrary commands.
 ## 2026-10-18 — Discoverability: topics, website, social preview
 
 **What:** Added repo topics, a keyword-first description, a one-page site at
-`docs/index.html` served by GitHub Pages at sarthakchhabra.com/switchboard, a 1280×640
+`docs/index.html` served by GitHub Pages at sarthakchhabra.com/claudecode-switchboard, a 1280×640
 `docs/social-preview.png` (first frame of `demo.gif`), and a descriptive README heading.
 Dropped the "No cost estimates" limitation, which the API-equivalent cost feature made false.
 

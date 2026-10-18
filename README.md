@@ -6,7 +6,7 @@ sessions are messaging each other.
 
 ![switchboard in action — live sessions, plan usage, costs, agent chatter, and the chat panel](docs/demo.gif)
 
-Not affiliated with Anthropic. Website: [sarthakchhabra.com/switchboard](https://sarthakchhabra.com/switchboard/)
+Not affiliated with Anthropic. Website: [sarthakchhabra.com/claudecode-switchboard](https://sarthakchhabra.com/claudecode-switchboard/)
 
 No dependencies, no build step, no telemetry. Two files and Node's stdlib.
 
