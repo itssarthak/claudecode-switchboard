@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>switchboard: a dashboard for every Claude Code session</title>
+<meta name="description" content="switchboard is a free, open-source local dashboard for every Claude Code session on your Mac: live status, token usage, plan limits, API-equivalent cost and messages between sessions.">
+<link rel="canonical" href="https://sarthakchhabra.com/switchboard/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="switchboard: a dashboard for every Claude Code session">
+<meta property="og:description" content="Every Claude Code session on your Mac, live: status, token burn, plan usage and messages between sessions.">
+<meta property="og:url" content="https://sarthakchhabra.com/switchboard/">
+<meta property="og:image" content="https://sarthakchhabra.com/switchboard/social-preview.png">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"SoftwareApplication","name":"switchboard","operatingSystem":"macOS","applicationCategory":"DeveloperApplication","description":"Local dashboard for every Claude Code session on your Mac: status, token usage, plan limits and messages between sessions.","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"downloadUrl":"https://github.com/itssarthak/claudecode-switchboard","image":"https://sarthakchhabra.com/switchboard/social-preview.png","url":"https://sarthakchhabra.com/switchboard/"}
+</script>
+<style>
+:root{--bg:#111;--fg:#eee;--muted:#aaa;--accent:#6fbf73;--code:#1c1c1c;--line:#333}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace}
+main{max-width:880px;margin:0 auto;padding:48px 16px}
+h1{font-size:clamp(1.6rem,5vw,2.4rem);line-height:1.2;margin:0 0 16px}
+p,li{color:var(--muted)}
+img{max-width:100%;height:auto;border:1px solid var(--line);border-radius:8px}
+pre{background:var(--code);border:1px solid var(--line);padding:16px;border-radius:8px;overflow-x:auto}
+a{color:var(--accent)}
+</style>
+</head>
+<body>
+<main>
+<h1>switchboard: a dashboard for every Claude Code session on your Mac</h1>
+<p>See what each Claude Code session is working on, how many tokens it has burned, how much of your plan is left, and which sessions are messaging each other. Free, open source, no dependencies, no telemetry. Not affiliated with Anthropic.</p>
+<img src="demo.gif" alt="switchboard in action: live Claude Code sessions, plan usage, costs, agent chatter and the chat panel">
+<h2>Features</h2>
+<ul>
+<li>Live status of every Claude Code session: busy, idle, waiting on you or stalled</li>
+<li>Token burn rate, context window use, model and git branch per session</li>
+<li>Live 5-hour and weekly plan usage, plus a derived weekly token budget</li>
+<li>API-equivalent cost per session and per day</li>
+<li>Messages flying between sessions, with a chatter log per project</li>
+<li>Click to focus a session's terminal, talk to it from the browser, or compact it</li>
+</ul>
+<h2>Install</h2>
+<p>As a Claude Code plugin, then run <code>/switchboard</code> in any session:</p>
+<pre><code>/plugin marketplace add itssarthak/claudecode-switchboard
+/plugin install switchboard</code></pre>
+<p>Or run it directly with Node 18+ on macOS:</p>
+<pre><code>node claude-sessions.js
+# http://localhost:7823</code></pre>
+<p><a href="https://github.com/itssarthak/claudecode-switchboard">Source code and full docs on GitHub</a></p>
+</main>
+</body>
+</html>

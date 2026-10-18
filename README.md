@@ -1,4 +1,4 @@
-# switchboard
+# switchboard: a dashboard for every Claude Code session
 
 A local dashboard for every Claude Code session running on your Mac — what each one is
 working on, how many tokens it has burned, how much of your plan is left, and which
@@ -6,7 +6,7 @@ sessions are messaging each other.
 
 ![switchboard in action — live sessions, plan usage, costs, agent chatter, and the chat panel](docs/demo.gif)
 
-Not affiliated with Anthropic.
+Not affiliated with Anthropic. Website: [sarthakchhabra.com/switchboard](https://sarthakchhabra.com/switchboard/)
 
 No dependencies, no build step, no telemetry. Two files and Node's stdlib.
 
@@ -395,8 +395,6 @@ anything that acts".
   weeks. Restart it occasionally.
 - **Cross-session envelopes lag by up to ~2s** and only appear once the message lands in
   the receiving session's transcript. It's a view, not a wire tap.
-- **No cost estimates.** Token counts are volume, not dollars; prices aren't on disk and
-  guessing them would be worse than omitting them.
 - AppleScript blocks the event loop for up to 5s on a focus or send.
 - `--selftest` covers token accounting and the `/talk` sanitiser. The AppleScript and quota
   paths are verified by hand.

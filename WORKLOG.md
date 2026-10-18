@@ -774,3 +774,15 @@ it can't be used to run arbitrary commands.
   reasoning about the code instead of looking at the output.
 - **Never log or serve the OAuth token.** It is read from the Keychain for one request and
   nothing else.
+
+## 2026-10-18 — Discoverability: topics, website, social preview
+
+**What:** Added repo topics, a keyword-first description, a one-page site at
+`docs/index.html` served by GitHub Pages at sarthakchhabra.com/switchboard, a 1280×640
+`docs/social-preview.png` (first frame of `demo.gif`), and a descriptive README heading.
+Dropped the "No cost estimates" limitation, which the API-equivalent cost feature made false.
+
+**Why:** The repo had no topics, no homepage and GitHub's generated card, so it was hard to find
+from GitHub or Google search for "Claude Code dashboard".
+
+**Verified:** `curl -I` on the live site returns 200 after Pages builds.
